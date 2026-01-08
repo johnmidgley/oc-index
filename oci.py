@@ -46,6 +46,19 @@ class FileInfoWithHash(FileInfo):
         return f"{size_str}  {modified_str:20s}  {hash_str}  {self.filename}"
 
 
+class DirectoryInfo:
+    """Represents information about a directory."""
+    
+    def __init__(self, path, file_infos, directory_infos=None):
+        self.path = path
+        self.file_infos = file_infos
+        self.directory_infos = directory_infos if directory_infos is not None else []
+    
+    def __str__(self):
+        """Returns the path."""
+        return self.path
+    
+
 def compute_file_hash(filepath):
     """
     Computes the SHA-256 hash of a file.
@@ -98,15 +111,49 @@ def get_file_infos_with_hash(directory):
         yield FileInfoWithHash(file_info.filename, file_info.last_modified, file_info.file_size, hash_value)
 
 
-def print_file_infos(directory):
+def build_index(path):
     """
-    Prints FileInfo objects for all files in a directory.
+    Recursively builds a DirectoryInfo tree starting from the given path.
+    Each DirectoryInfo contains FileInfos populated by get_file_infos.
     
     Args:
-        directory: Path to the directory to scan and print files from.
+        path: Root path to start building the index from.
+    
+    Returns:
+        DirectoryInfo containing the directory structure with nested DirectoryInfos.
     """
-    for file_info in get_file_infos_with_hash(directory):
+    
+    print(f"{path}") 
+
+    # Convert path to absolute path for consistent handling
+    abs_path = os.path.abspath(path)
+    
+    # Get FileInfos for files in the current directory
+    file_infos = list(get_file_infos(abs_path))
+    
+    # Recursively build DirectoryInfos for subdirectories
+    directory_infos = []
+    try:
+        for filename in os.listdir(abs_path):
+            subdir_path = os.path.join(abs_path, filename)
+            if os.path.isdir(subdir_path):
+                subdir_info = build_index(subdir_path)
+                directory_infos.append(subdir_info)
+    except PermissionError:
+        # Skip directories we don't have permission to read
+        pass
+    
+    return DirectoryInfo(abs_path, file_infos, directory_infos)
+
+def print_directory_info(directory_info):
+    """
+    Prints the index in a tree-like format.
+    """
+    print(directory_info.path)
+    for file_info in directory_info.file_infos:
         print(file_info)
+    for subdir_info in directory_info.directory_infos:
+        print_directory_info(subdir_info) 
 
 
 if __name__ == "__main__":
@@ -115,5 +162,6 @@ if __name__ == "__main__":
     else:
         directory = sys.argv[1]
     
-    print_file_infos(directory)
+    directory_info = build_index(directory)
+    print_directory_info(directory_info)
 
