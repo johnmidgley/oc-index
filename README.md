@@ -2,30 +2,129 @@
 
 `oci` is a command line tool, written in Rust, that creates an index of files in a directory, including all subdirectories. The purpose of the index is to be able to track files by hash. It is similar to `git`, but does not track any changes; it only cares about file identity. 
 
+## Quick Start
 
-To initialize `oci`, switch to the directory you want to index and call
+```bash
+# Initialize an index in your project directory
+oci init
+
+# Add some files
+echo "Hello, world!" > test.txt
+
+# Commit files to the index
+oci commit
+
+# List indexed files
+oci ls
+
+# Check status (shows added, modified, deleted files)
+oci status
+
+# Find files by hash
+oci grep <hash>
+
+# Ignore patterns
+oci ignore "*.log"
+
+# Remove the index
+oci rm -f
+```
+
+The following sections describe the sub-commands available in detail.
+
+## init
+
+To initialize `oci`, switch to the directory you want to index (the repository root) and call
 
 ```
 oci init
 ```
 
-This will first check that there is not existing index (located in the .oci directory). If the directory already exists, the user is warned with an error and the tool exits. If the directory does not exist, then it is created and a `index.txt` file is created in the directory. `oci` then recusively traverses all directories and outputs each directory directory path on a line, followed by file entries that look like 
- 
-```
-num_bytes modified sha256 name
-```
+This will first check that there is not an existing index (located in the .oci directory). If the directory already exists, the user is warned with an error and the tool exits. If the directory does not exist, then an empty index is created. 
 
-Where
+The index has the following information for each file it tracks:
 
 | Field | Description |
 | ----- | ----------- |
 | num_bytes  | The file size in bytes |
 | modified | The last time the file was modified in epoch time in milliseconds |
 | sha256 | The sha256 hash of the file contents |
-| basename | The basename of the file |
+| path | The full path of the file (for efficiency this may not be explicitly stored, but derived from the location in the index) |
+
+[TODO: Consider a content type field]
+
+The index is organized so that it can efficiently access files for a given directory and can recurse from any directory being tracked, which is required for other commands.
+
+## ignore
+
+For files that should be ignored by oci (i.e. not included in the index and ignored by all commands) call
+
+```
+oci ignore [pattern]
+```
+
+where `pattern` is optional and can be a file, directory, or arbirary path pattern (like git). Patterns that are to be ignored are stored in the .oci directory in `.ocignore`. If `pattern` is a relative path, it is expanded to be a path from the root of the repository before added to the ignore file. If `pattern` is ommited, then the current directory is used. 
+
+## status
+
+To check for differences between the index and the file system, use
+
+```
+oci status
+```
+
+A file is considered not changed if its size and last modified time match the index. The path of any file that has chnaged is output with a '+' prefix to indicate that it exists in the filessytem but not the index, a '-' prefix to indicate it exists in the index but not the filesystem, and an 'M' prefix to indicate the the filesystem version has been modified from what the index contains. 
+
+Files are output in a human readable format with the following fields
+
+```
+num_bytes modified sha256 path
+```
+
+For each file, ```path``` should be relative to where the command was called. 
+
+ Without the `-r` option, only status for the current dicrectory will be displayed. With the `-r` option, the current directory and all subdirectories will be displayed.
+
+## commit
+
+To commit any changes to the index, which means updating any fields in the index that have changed (e.g. sha256) call
+
+```oci commit [pattern]```
+
+If `pattern` is a file, that single file is updated in the index. If `pattern` is a directory, all files that have changed in that directory and any sub-directories ( recursively) are updated in the index. If `pattern` is ommited, the repository root is assumed. 
+
+## ls
+
+To list the index for the current directory, call
+
+```oci ls [-r]```
+
+Similar to the `status` command, files are output in a human readable format with the following fields
+
+```
+num_bytes modified sha256 path
+```
+
+The opional `-r` flag causes the command to recurse to all sub-directories.
+
+## grep
+
+To find any files that match a given hash, call:
+
+```
+oci grep <hash>
+```
+
+Where `<hash>` is the SHA256 hash of the file content you're looking for. This will list all files in the index with that hash. 
+
+## rm
 
 To remove an index, call
 
 ```
-oci rm
+oci rm -f
 ```
+
+The `-f` flag is required for safety, so if it's not present the tool returns an error to the user.
+
+This deletes the .oci directory.
