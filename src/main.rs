@@ -98,7 +98,16 @@ fn create_file_entry(
     })
 }
 
-fn scan_directory(current_dir: &Path, oci_dir: &Path) -> Result<(Vec<PathBuf>, Vec<FileEntry>), Box<dyn std::error::Error>> {
+fn scan_directory<F, G>(
+    current_dir: &Path,
+    oci_dir: &Path,
+    mut on_directory: F,
+    mut on_file: G,
+) -> Result<(Vec<PathBuf>, Vec<FileEntry>), Box<dyn std::error::Error>>
+where
+    F: FnMut(&PathBuf),
+    G: FnMut(&Path) -> Result<FileEntry, Box<dyn std::error::Error>>,
+{
     let mut directories: Vec<PathBuf> = Vec::new();
     let mut file_entries: Vec<FileEntry> = Vec::new();
     
@@ -116,9 +125,10 @@ fn scan_directory(current_dir: &Path, oci_dir: &Path) -> Result<(Vec<PathBuf>, V
         
         if entry.file_type().is_dir() {
             let rel_path = path.strip_prefix(current_dir)?.to_path_buf();
+            on_directory(&rel_path);
             directories.push(rel_path);
         } else if entry.file_type().is_file() {
-            let file_entry = create_file_entry(path, current_dir)?;
+            let file_entry = on_file(path)?;
             file_entries.push(file_entry);
         }
     }
@@ -168,7 +178,26 @@ fn init_index() -> Result<(), Box<dyn std::error::Error>> {
     let oci_dir = current_dir.join(".oci");
     
     ensure_oci_dir(&oci_dir)?;
-    let (directories, file_entries) = scan_directory(&current_dir, &oci_dir)?;
+    
+    let (directories, file_entries) = scan_directory(
+        &current_dir,
+        &oci_dir,
+        |_| {
+            // No-op: don't print directories
+        },
+        |path| {
+            let file_entry = create_file_entry(path, &current_dir)?;
+            let rel_path = path.strip_prefix(&current_dir)?;
+            let path_str = if rel_path == Path::new("") {
+                ".".to_string()
+            } else {
+                rel_path.to_string_lossy().to_string()
+            };
+            println!("+ {}", path_str);
+            Ok(file_entry)
+        },
+    )?;
+    
     write_index_file(&oci_dir, directories, file_entries)?;
     
     Ok(())
