@@ -17,6 +17,8 @@ struct Cli {
 enum Commands {
     /// Initialize oci in the current directory
     Init,
+    /// Remove the oci index from the current directory
+    Rm,
 }
 
 fn main() {
@@ -25,6 +27,12 @@ fn main() {
     match cli.command {
         Commands::Init => {
             if let Err(e) = init_index() {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Commands::Rm => {
+            if let Err(e) = rm_index() {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -152,6 +160,23 @@ fn init_index() -> Result<(), Box<dyn std::error::Error>> {
             )?;
         }
     }
+    
+    Ok(())
+}
+
+fn rm_index() -> Result<(), Box<dyn std::error::Error>> {
+    // Get current directory
+    let current_dir = std::env::current_dir()?;
+    let oci_dir = current_dir.join(".oci");
+    
+    // Check if .oci directory exists
+    if !oci_dir.exists() {
+        eprintln!("Error: .oci directory does not exist. No index to remove.");
+        std::process::exit(1);
+    }
+    
+    // Remove the .oci directory and all its contents
+    fs::remove_dir_all(&oci_dir)?;
     
     Ok(())
 }

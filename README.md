@@ -23,3 +23,9 @@ Where
 | modified | The last time the file was modified in epoch time in milliseconds |
 | sha256 | The sha256 hash of the file contents |
 | basename | The basename of the file |
+
+To remove an index, call
+
+```
+oci rm
+```
