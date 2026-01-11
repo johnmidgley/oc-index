@@ -168,6 +168,7 @@ pub fn commit(pattern: Option<String>) -> Result<()> {
     }
     
     let mut updated_count = 0;
+    let mut skipped_count = 0;
     
     if target_path.is_file() {
         // Commit single file
@@ -176,9 +177,13 @@ pub fn commit(pattern: Option<String>) -> Result<()> {
         let rel_path_str = rel_path.to_string_lossy().to_string();
         
         if !ignore::should_ignore(&target_path, &patterns) {
-            let entry = file_utils::create_file_entry(&target_path, rel_path_str)?;
-            index.upsert(entry);
-            updated_count += 1;
+            if should_update_file(&index, &target_path, &rel_path_str)? {
+                let entry = file_utils::create_file_entry(&target_path, rel_path_str)?;
+                index.upsert(entry);
+                updated_count += 1;
+            } else {
+                skipped_count += 1;
+            }
         }
     } else {
         // Commit directory recursively
@@ -191,15 +196,22 @@ pub fn commit(pattern: Option<String>) -> Result<()> {
                     .context("Path is outside repository")?;
                 let rel_path_str = rel_path.to_string_lossy().to_string();
                 
-                let file_entry = file_utils::create_file_entry(entry.path(), rel_path_str)?;
-                index.upsert(file_entry);
-                updated_count += 1;
+                if should_update_file(&index, entry.path(), &rel_path_str)? {
+                    let file_entry = file_utils::create_file_entry(entry.path(), rel_path_str)?;
+                    index.upsert(file_entry);
+                    updated_count += 1;
+                } else {
+                    skipped_count += 1;
+                }
             }
         }
     }
     
     index.save(&repo_root)?;
     println!("Updated {} file(s) in the index", updated_count);
+    if skipped_count > 0 {
+        println!("Skipped {} unchanged file(s)", skipped_count);
+    }
     
     Ok(())
 }
@@ -272,6 +284,18 @@ pub fn rm(force: bool) -> Result<()> {
     
     println!("Removed index at {}", oci_dir.display());
     Ok(())
+}
+
+/// Check if a file should be updated in the index
+/// Returns true if the file is new or has changed (size or modified time differ)
+fn should_update_file(index: &Index, file_path: &Path, rel_path: &str) -> Result<bool> {
+    if let Some(entry) = index.get(rel_path) {
+        // File exists in index - check if it has changed
+        file_utils::has_changed(entry, file_path)
+    } else {
+        // File not in index - needs to be added
+        Ok(true)
+    }
 }
 
 /// Helper function to create a file entry with a specific display path

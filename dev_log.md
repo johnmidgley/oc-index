@@ -33,7 +33,7 @@ The `oci` tool is implemented as a Rust CLI application with the following modul
 
 2. **Hash Algorithm**: SHA256 was chosen for file hashing as it provides good collision resistance and is widely used in content-addressable systems.
 
-3. **Change Detection**: Files are considered unchanged if both size and modified time match. This avoids unnecessary hashing for status checks. Full hash comparison happens during commit.
+3. **Change Detection**: Files are considered unchanged if both size and modified time match. This avoids unnecessary hashing for both status checks and commits. The `commit` command only recomputes hashes for files that are new or have changed (different size or modified time), making it efficient for incremental updates. Files that haven't changed are skipped and counted separately in the output.
 
 4. **Path Handling**: All paths in the index are stored relative to the repository root for portability. Display paths are made relative to the current working directory for user convenience.
 

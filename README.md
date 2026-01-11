@@ -93,6 +93,8 @@ To commit any changes to the index, which means updating any fields in the index
 
 If `pattern` is a file, that single file is updated in the index. If `pattern` is a directory, all files that have changed in that directory and any sub-directories ( recursively) are updated in the index. If `pattern` is ommited, the repository root is assumed. 
 
+`commit` is done efficiently, only computing hashes for files that have changed, skipping any files that have not changed (i.e. num_bytes and modified haven't changed). When files are skipped, a summary is displayed showing how many files were updated versus skipped.
+
 ## ls
 
 To list the index for the current directory, call

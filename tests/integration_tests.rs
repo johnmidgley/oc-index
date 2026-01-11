@@ -200,3 +200,34 @@ fn test_recursive_operations() {
     assert!(stdout.contains("root.txt"));
     assert!(stdout.contains("nested.txt"));
 }
+
+#[test]
+fn test_commit_skips_unchanged_files() {
+    let temp_dir = TempDir::new().unwrap();
+    run_oci(&["init"], temp_dir.path());
+    
+    // Create test files
+    fs::write(temp_dir.path().join("file1.txt"), "content1").unwrap();
+    fs::write(temp_dir.path().join("file2.txt"), "content2").unwrap();
+    
+    // First commit - should update both files
+    let (stdout, _, exit_code) = run_oci(&["commit"], temp_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Updated 2 file(s)"));
+    
+    // Second commit without changes - should skip both files
+    let (stdout, _, exit_code) = run_oci(&["commit"], temp_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Updated 0 file(s)"));
+    assert!(stdout.contains("Skipped 2 unchanged file(s)"));
+    
+    // Modify one file
+    std::thread::sleep(std::time::Duration::from_millis(10)); // Ensure modified time changes
+    fs::write(temp_dir.path().join("file1.txt"), "modified content").unwrap();
+    
+    // Third commit - should update only the modified file
+    let (stdout, _, exit_code) = run_oci(&["commit"], temp_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Updated 1 file(s)"));
+    assert!(stdout.contains("Skipped 1 unchanged file(s)"));
+}
