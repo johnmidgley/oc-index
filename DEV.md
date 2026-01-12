@@ -29,7 +29,13 @@ The `oci` tool is implemented as a Rust CLI application with the following modul
 
 ### Design Decisions
 
-1. **Index Storage**: The index is stored as a JSON file (`.oci/index.json`) for simplicity and human readability. For large repositories, this could be optimized with a binary format or database.
+1. **Index Storage**: The index is stored as a SQLite database (`.oci/index.db`) for efficiency and scalability. SQLite provides:
+   - Compact binary storage (much smaller than JSON)
+   - Fast indexed queries by path (primary key) and hash (indexed column)
+   - Incremental updates without loading the entire index into memory
+   - Ability to handle millions of files efficiently
+   - Transaction support for atomic updates
+   This design scales well from small projects to full hard drive indexing.
 
 2. **Hash Algorithm**: SHA256 was chosen for file hashing as it provides good collision resistance and is widely used in content-addressable systems.
 

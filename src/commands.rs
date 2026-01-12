@@ -39,7 +39,7 @@ pub fn init() -> Result<()> {
     fs::create_dir_all(&oci_dir)
         .context("Failed to create .oci directory")?;
     
-    let index = Index::new();
+    let index = Index::new()?;
     index.save(&current_dir)?;
     
     println!("Initialized empty oci index in {}", oci_dir.display());
@@ -105,9 +105,9 @@ pub fn status(recursive: bool) -> Result<()> {
     
     // Get indexed files for comparison
     let indexed_files: Vec<_> = if recursive {
-        index.get_dir_files_recursive(&rel_current_str)
+        index.get_dir_files_recursive(&rel_current_str)?
     } else {
-        index.get_dir_files(&rel_current_str)
+        index.get_dir_files(&rel_current_str)?
     };
     
     let mut has_changes = false;
@@ -116,9 +116,9 @@ pub fn status(recursive: bool) -> Result<()> {
     for fs_path in &fs_files {
         let full_path = repo_root.join(fs_path);
         
-        if let Some(entry) = index.get(fs_path) {
+        if let Some(entry) = index.get(fs_path)? {
             // File exists in index - check if modified
-            if file_utils::has_changed(entry, &full_path)? {
+            if file_utils::has_changed(&entry, &full_path)? {
                 // Display relative to current directory
                 let display_path = make_relative_to_current(&repo_root, &current_dir, fs_path)?;
                 println!("M {}", file_utils::format_entry(&create_entry_with_path(&full_path, display_path)?));
@@ -179,7 +179,7 @@ pub fn update(pattern: Option<String>) -> Result<()> {
         if !ignore::should_ignore(&target_path, &patterns) {
             if should_update_file(&index, &target_path, &rel_path_str)? {
                 let entry = file_utils::create_file_entry(&target_path, rel_path_str)?;
-                index.upsert(entry);
+                index.upsert(entry)?;
                 updated_count += 1;
             } else {
                 skipped_count += 1;
@@ -198,7 +198,7 @@ pub fn update(pattern: Option<String>) -> Result<()> {
                 
                 if should_update_file(&index, entry.path(), &rel_path_str)? {
                     let file_entry = file_utils::create_file_entry(entry.path(), rel_path_str)?;
-                    index.upsert(file_entry);
+                    index.upsert(file_entry)?;
                     updated_count += 1;
                 } else {
                     skipped_count += 1;
@@ -227,9 +227,9 @@ pub fn ls(recursive: bool) -> Result<()> {
     let rel_current_str = rel_current.to_string_lossy().to_string();
     
     let mut entries: Vec<_> = if recursive {
-        index.get_dir_files_recursive(&rel_current_str)
+        index.get_dir_files_recursive(&rel_current_str)?
     } else {
-        index.get_dir_files(&rel_current_str)
+        index.get_dir_files(&rel_current_str)?
     };
     
     if entries.is_empty() {
@@ -255,7 +255,7 @@ pub fn grep(hash: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let index = Index::load(&repo_root)?;
     
-    let matches = index.find_by_hash(hash);
+    let matches = index.find_by_hash(hash)?;
     
     if matches.is_empty() {
         println!("No files found with hash: {}", hash);
@@ -264,7 +264,7 @@ pub fn grep(hash: &str) -> Result<()> {
     
     println!("Found {} file(s) with hash {}:", matches.len(), hash);
     for entry in matches {
-        println!("{}", file_utils::format_entry(entry));
+        println!("{}", file_utils::format_entry(&entry));
     }
     
     Ok(())
@@ -289,9 +289,9 @@ pub fn rm(force: bool) -> Result<()> {
 /// Check if a file should be updated in the index
 /// Returns true if the file is new or has changed (size or modified time differ)
 fn should_update_file(index: &Index, file_path: &Path, rel_path: &str) -> Result<bool> {
-    if let Some(entry) = index.get(rel_path) {
+    if let Some(entry) = index.get(rel_path)? {
         // File exists in index - check if it has changed
-        file_utils::has_changed(entry, file_path)
+        file_utils::has_changed(&entry, file_path)
     } else {
         // File not in index - needs to be added
         Ok(true)

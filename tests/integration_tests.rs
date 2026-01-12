@@ -52,7 +52,7 @@ fn test_init_creates_oci_directory() {
     assert_eq!(exit_code, 0);
     assert!(stdout.contains("Initialized empty oci index"));
     assert!(temp_dir.path().join(".oci").exists());
-    assert!(temp_dir.path().join(".oci/index.json").exists());
+    assert!(temp_dir.path().join(".oci/index.db").exists());
 }
 
 #[test]
