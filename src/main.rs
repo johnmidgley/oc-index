@@ -54,9 +54,31 @@ enum Commands {
         hash: String,
     },
     
+    /// Remove files that exist in another index
+    Prune {
+        /// Path to another oci index (source)
+        source: Option<String>,
+        
+        /// Permanently delete pruned files
+        #[arg(long)]
+        purge: bool,
+        
+        /// Restore all pruned files
+        #[arg(long)]
+        restore: bool,
+        
+        /// Force operation without confirmation (for purge)
+        #[arg(short, long)]
+        force: bool,
+        
+        /// Don't prune files matching source's ignore patterns
+        #[arg(long)]
+        no_ignore: bool,
+    },
+    
     /// Remove the index (opposite of init)
     Deinit {
-        /// Force removal (required)
+        /// Force removal without confirmation
         #[arg(short)]
         f: bool,
     },
@@ -72,6 +94,7 @@ fn main() -> Result<()> {
         Commands::Update { pattern } => commands::update(pattern),
         Commands::Ls { r } => commands::ls(r),
         Commands::Grep { hash } => commands::grep(&hash),
+        Commands::Prune { source, purge, restore, force, no_ignore } => commands::prune(source, purge, restore, force, no_ignore),
         Commands::Deinit { f } => commands::deinit(f),
     }
 }

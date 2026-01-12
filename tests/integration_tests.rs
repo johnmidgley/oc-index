@@ -184,12 +184,7 @@ fn test_deinit_removes_index() {
     
     assert!(temp_dir.path().join(".oci").exists());
     
-    // Deinit without -f should fail
-    let (_, stderr, exit_code) = run_oci(&["deinit"], temp_dir.path());
-    assert_ne!(exit_code, 0);
-    assert!(stderr.contains("-f flag is required"));
-    
-    // Deinit with -f should succeed
+    // Deinit with -f should succeed (skips confirmation)
     let (stdout, _, exit_code) = run_oci(&["deinit", "-f"], temp_dir.path());
     assert_eq!(exit_code, 0);
     assert!(stdout.contains("Deinitialized"));
@@ -249,4 +244,350 @@ fn test_update_skips_unchanged_files() {
     assert_eq!(exit_code, 0);
     assert!(stdout.contains("Updated 1 file(s)"));
     assert!(stdout.contains("Skipped 1 unchanged file(s)"));
+}
+
+#[test]
+fn test_prune_moves_files_to_pruneyard() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Create files with same content in both repositories
+    fs::write(source_dir.path().join("common.txt"), "shared content").unwrap();
+    fs::write(local_dir.path().join("common.txt"), "shared content").unwrap();
+    fs::write(local_dir.path().join("unique.txt"), "unique content").unwrap();
+    
+    // Update both indices
+    run_oci(&["update"], source_dir.path());
+    run_oci(&["update"], local_dir.path());
+    
+    // Prune local using source
+    let source_path = source_dir.path().to_str().unwrap();
+    let (stdout, _, exit_code) = run_oci(&["prune", source_path], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Pruned 1 file(s)"));
+    assert!(stdout.contains("common.txt"));
+    assert!(stdout.contains("1 duplicates"));
+    
+    // Verify common.txt was moved to pruneyard
+    assert!(!local_dir.path().join("common.txt").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/common.txt").exists());
+    
+    // Verify unique.txt still exists
+    assert!(local_dir.path().join("unique.txt").exists());
+    
+    // Verify index was updated
+    let (stdout, _, _) = run_oci(&["ls", "-r"], local_dir.path());
+    assert!(!stdout.contains("common.txt"));
+    assert!(stdout.contains("unique.txt"));
+}
+
+#[test]
+fn test_prune_fails_with_pending_changes() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Create and index a file in local
+    fs::write(local_dir.path().join("test.txt"), "content").unwrap();
+    run_oci(&["update"], local_dir.path());
+    
+    // Modify the file without updating the index
+    fs::write(local_dir.path().join("test.txt"), "modified").unwrap();
+    
+    // Prune should fail due to pending changes
+    let source_path = source_dir.path().to_str().unwrap();
+    let (_, stderr, exit_code) = run_oci(&["prune", source_path], local_dir.path());
+    assert_ne!(exit_code, 0);
+    assert!(stderr.contains("pending changes"));
+}
+
+#[test]
+fn test_prune_purge_deletes_files() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Create files with same content
+    fs::write(source_dir.path().join("file.txt"), "content").unwrap();
+    fs::write(local_dir.path().join("file.txt"), "content").unwrap();
+    
+    // Update both indices
+    run_oci(&["update"], source_dir.path());
+    run_oci(&["update"], local_dir.path());
+    
+    // Prune local using source
+    let source_path = source_dir.path().to_str().unwrap();
+    run_oci(&["prune", source_path], local_dir.path());
+    
+    // Verify file is in pruneyard
+    assert!(local_dir.path().join(".oci/pruneyard/file.txt").exists());
+    
+    // Purge pruned files
+    let (stdout, _, exit_code) = run_oci(&["prune", "--purge", "--force"], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Permanently deleted 1 pruned file(s)"));
+    
+    // Verify pruneyard is gone
+    assert!(!local_dir.path().join(".oci/pruneyard").exists());
+}
+
+#[test]
+fn test_prune_without_source_fails() {
+    let local_dir = TempDir::new().unwrap();
+    run_oci(&["init"], local_dir.path());
+    
+    // Prune without source path should fail
+    let (_, stderr, exit_code) = run_oci(&["prune"], local_dir.path());
+    assert_ne!(exit_code, 0);
+    assert!(stderr.contains("Source path is required"));
+}
+
+#[test]
+fn test_prune_same_index_fails() {
+    let local_dir = TempDir::new().unwrap();
+    run_oci(&["init"], local_dir.path());
+    
+    // Prune using the same index as source should fail
+    let source_path = local_dir.path().to_str().unwrap();
+    let (_, stderr, exit_code) = run_oci(&["prune", source_path], local_dir.path());
+    assert_ne!(exit_code, 0);
+    assert!(stderr.contains("Cannot prune using the same index"));
+}
+
+#[test]
+fn test_prune_restore() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Create files with same content in both repositories
+    fs::write(source_dir.path().join("common.txt"), "shared content").unwrap();
+    fs::write(local_dir.path().join("common.txt"), "shared content").unwrap();
+    fs::write(local_dir.path().join("unique.txt"), "unique content").unwrap();
+    
+    // Update both indices
+    run_oci(&["update"], source_dir.path());
+    run_oci(&["update"], local_dir.path());
+    
+    // Prune local using source
+    let source_path = source_dir.path().to_str().unwrap();
+    run_oci(&["prune", source_path], local_dir.path());
+    
+    // Verify file was pruned
+    assert!(!local_dir.path().join("common.txt").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/common.txt").exists());
+    
+    // Restore pruned files
+    let (stdout, _, exit_code) = run_oci(&["prune", "--restore"], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Restored 1 file(s)"));
+    assert!(stdout.contains("common.txt"));
+    
+    // Verify file was restored
+    assert!(local_dir.path().join("common.txt").exists());
+    assert!(!local_dir.path().join(".oci/pruneyard").exists());
+    
+    // Verify file is back in index
+    let (stdout, _, _) = run_oci(&["ls", "-r"], local_dir.path());
+    assert!(stdout.contains("common.txt"));
+    assert!(stdout.contains("unique.txt"));
+    
+    // Verify content is correct
+    let content = fs::read_to_string(local_dir.path().join("common.txt")).unwrap();
+    assert_eq!(content, "shared content");
+}
+
+#[test]
+fn test_prune_restore_preserves_directory_structure() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Create nested directory structure
+    fs::create_dir_all(source_dir.path().join("subdir/nested")).unwrap();
+    fs::create_dir_all(local_dir.path().join("subdir/nested")).unwrap();
+    
+    // Create files with same content in nested directories
+    fs::write(source_dir.path().join("subdir/nested/file.txt"), "content").unwrap();
+    fs::write(local_dir.path().join("subdir/nested/file.txt"), "content").unwrap();
+    
+    // Update both indices
+    run_oci(&["update"], source_dir.path());
+    run_oci(&["update"], local_dir.path());
+    
+    // Prune local using source
+    let source_path = source_dir.path().to_str().unwrap();
+    run_oci(&["prune", source_path], local_dir.path());
+    
+    // Verify file was pruned
+    assert!(!local_dir.path().join("subdir/nested/file.txt").exists());
+    
+    // Restore pruned files
+    let (stdout, _, exit_code) = run_oci(&["prune", "--restore"], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Restored 1 file(s)"));
+    
+    // Verify file was restored with correct directory structure
+    assert!(local_dir.path().join("subdir/nested/file.txt").exists());
+    
+    // Verify content is correct
+    let content = fs::read_to_string(local_dir.path().join("subdir/nested/file.txt")).unwrap();
+    assert_eq!(content, "content");
+}
+
+#[test]
+fn test_prune_preserves_directory_structure() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Create nested directory structure
+    fs::create_dir_all(source_dir.path().join("subdir/nested")).unwrap();
+    fs::create_dir_all(local_dir.path().join("subdir/nested")).unwrap();
+    
+    // Create files with same content in nested directories
+    fs::write(source_dir.path().join("subdir/nested/file.txt"), "content").unwrap();
+    fs::write(local_dir.path().join("subdir/nested/file.txt"), "content").unwrap();
+    
+    // Update both indices
+    run_oci(&["update"], source_dir.path());
+    run_oci(&["update"], local_dir.path());
+    
+    // Prune local using source
+    let source_path = source_dir.path().to_str().unwrap();
+    let (stdout, _, exit_code) = run_oci(&["prune", source_path], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Pruned 1 file(s)"));
+    assert!(stdout.contains("1 duplicates"));
+    
+    // Verify file was moved with directory structure preserved
+    assert!(!local_dir.path().join("subdir/nested/file.txt").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/subdir/nested/file.txt").exists());
+}
+
+#[test]
+fn test_prune_removes_ignored_files() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Add ignore pattern to source
+    run_oci(&["ignore", "*.log"], source_dir.path());
+    
+    // Create files in local (including a .log file)
+    fs::write(local_dir.path().join("important.txt"), "keep this").unwrap();
+    fs::write(local_dir.path().join("debug.log"), "remove this").unwrap();
+    
+    // Update local index
+    run_oci(&["update"], local_dir.path());
+    
+    // Prune local using source - should remove .log file based on source ignore patterns
+    let source_path = source_dir.path().to_str().unwrap();
+    let (stdout, _, exit_code) = run_oci(&["prune", source_path], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Pruned 1 file(s)"));
+    assert!(stdout.contains("debug.log"));
+    assert!(stdout.contains("ignored"));
+    assert!(stdout.contains("1 ignored"));
+    
+    // Verify .log file was pruned
+    assert!(!local_dir.path().join("debug.log").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/debug.log").exists());
+    
+    // Verify important.txt still exists
+    assert!(local_dir.path().join("important.txt").exists());
+}
+
+#[test]
+fn test_prune_no_ignore_flag() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Add ignore pattern to source
+    run_oci(&["ignore", "*.log"], source_dir.path());
+    
+    // Create files in local (including a .log file)
+    fs::write(local_dir.path().join("important.txt"), "keep this").unwrap();
+    fs::write(local_dir.path().join("debug.log"), "keep this too").unwrap();
+    
+    // Update local index
+    run_oci(&["update"], local_dir.path());
+    
+    // Prune local using source with --no-ignore flag
+    let source_path = source_dir.path().to_str().unwrap();
+    let (stdout, _, exit_code) = run_oci(&["prune", source_path, "--no-ignore"], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("No files to prune") || stdout.contains("Pruned 0 file(s)"));
+    
+    // Verify .log file was NOT pruned
+    assert!(local_dir.path().join("debug.log").exists());
+    assert!(local_dir.path().join("important.txt").exists());
+}
+
+#[test]
+fn test_prune_removes_empty_directories() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Create nested directory structure with a file
+    fs::create_dir_all(local_dir.path().join("dir1/dir2/dir3")).unwrap();
+    fs::write(local_dir.path().join("dir1/dir2/dir3/file.txt"), "content").unwrap();
+    
+    // Create an already-empty directory
+    fs::create_dir_all(local_dir.path().join("empty1/empty2")).unwrap();
+    
+    // Create a file with same content in source
+    fs::write(source_dir.path().join("file.txt"), "content").unwrap();
+    
+    // Update both indices
+    run_oci(&["update"], source_dir.path());
+    run_oci(&["update"], local_dir.path());
+    
+    // Verify directory structures exist before prune
+    assert!(local_dir.path().join("dir1/dir2/dir3").exists());
+    assert!(local_dir.path().join("empty1/empty2").exists());
+    
+    // Prune local using source (will remove the file)
+    let source_path = source_dir.path().to_str().unwrap();
+    run_oci(&["prune", source_path], local_dir.path());
+    
+    // Verify file is gone
+    assert!(!local_dir.path().join("dir1/dir2/dir3/file.txt").exists());
+    
+    // Verify all empty directories were removed
+    assert!(!local_dir.path().join("dir1/dir2/dir3").exists());
+    assert!(!local_dir.path().join("dir1/dir2").exists());
+    assert!(!local_dir.path().join("dir1").exists());
+    assert!(!local_dir.path().join("empty1/empty2").exists());
+    assert!(!local_dir.path().join("empty1").exists());
 }

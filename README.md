@@ -28,7 +28,10 @@ oci grep <hash>
 # Ignore patterns
 oci ignore "*.log"
 
-# Remove the index
+# Remove the index (with confirmation)
+oci deinit
+
+# Or remove the index without confirmation
 oci deinit -f
 ```
 
@@ -215,7 +218,9 @@ Note: The `update` command will automatically remove files from the index that n
 
 To list the index for the current directory, call
 
-```oci ls [-r]```
+```
+oci ls [-r]
+```
 
 Similar to the `status` command, files are output in a human readable format with the following fields
 
@@ -235,14 +240,69 @@ oci grep <hash>
 
 Where `<hash>` is the SHA256 hash of the file content you're looking for. This will list all files in the index with that hash. 
 
+## prune 
+
+If you'd like to remove files based on another index, call
+
+```
+oci prune <source>
+```
+
+where `<source>` is a path to another `oci` index. If there are any pending updates (i.e. `status` shows changes), the prune exits with an error. 
+
+If there are no pending changes, the prune command removes two types of files:
+
+1. **Duplicate files** - Any file in the local index that is also in the `<source>` index, determined by matching SHA256 hash
+2. **Ignored files** - Any file in the local index that matches the ignore patterns defined in the `<source>` index's `.ocignore` file
+
+All pruned files are moved to `.oci/pruneyard/<path>` where path is the previous relative path to the file in the local index. After moving files, any empty directories are automatically removed. The output shows which files were pruned and the reason:
+
+```
+Pruned (duplicate): file1.txt
+Pruned (ignored): debug.log
+Pruned 2 file(s) to .oci/pruneyard/ (1 duplicates, 1 ignored)
+```
+
+### Options
+
+To only prune duplicate files and skip checking the source's ignore patterns, use:
+
+```
+oci prune <source> --no-ignore
+```
+
+To restore all pruned files back to their original locations, call:
+
+```
+oci prune --restore
+```
+
+This will move all files from `.oci/pruneyard/` back to their original locations and add them back to the index. The pruneyard directory is removed after restoration.
+
+To permanently delete pruned files, call:
+
+```
+oci prune --purge
+```
+
+This command will ask for confirmation before deleting. To skip the confirmation prompt (useful for scripts), use the `-f` or `--force` flag:
+
+```
+oci prune --purge -f
+```
+
 ## deinit
 
 To deinitialize and remove an index, call
 
 ```
+oci deinit
+```
+
+This will ask for confirmation before deleting the `.oci` directory. To skip the confirmation prompt (useful for scripts), use the `-f` flag:
+
+```
 oci deinit -f
 ```
 
-The `-f` flag is required for safety, so if it's not present the tool returns an error to the user.
-
-This deletes the .oci directory, which is the opposite of `init`.
+This command deletes the `.oci` directory, which is the opposite of `init`.

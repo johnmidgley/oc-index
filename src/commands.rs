@@ -369,14 +369,295 @@ pub fn grep(hash: &str) -> Result<()> {
     Ok(())
 }
 
-/// Remove the index (deinitialize)
-pub fn deinit(force: bool) -> Result<()> {
-    if !force {
-        bail!("The -f flag is required to deinitialize the index");
+/// Prune files that exist in another index
+pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no_ignore: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    
+    if restore {
+        // Restore pruned files
+        let pruneyard_path = repo_root.join(OCI_DIR).join("pruneyard");
+        
+        if !pruneyard_path.exists() {
+            println!("No pruneyard directory exists");
+            return Ok(());
+        }
+        
+        let mut index = Index::load(&repo_root)?;
+        let mut restored_count = 0;
+        
+        // Walk through pruneyard and restore files
+        for entry in WalkDir::new(&pruneyard_path) {
+            let entry = entry?;
+            
+            if entry.file_type().is_file() {
+                let rel_from_pruneyard = entry.path().strip_prefix(&pruneyard_path)
+                    .context("Failed to get relative path from pruneyard")?;
+                let original_path = repo_root.join(rel_from_pruneyard);
+                
+                // Create parent directories if needed
+                if let Some(parent) = original_path.parent() {
+                    fs::create_dir_all(parent)
+                        .context(format!("Failed to create directory: {}", parent.display()))?;
+                }
+                
+                // Move file back to original location
+                fs::rename(entry.path(), &original_path)
+                    .context(format!("Failed to restore file: {}", entry.path().display()))?;
+                
+                // Add back to index
+                let rel_path_str = rel_from_pruneyard.to_string_lossy().to_string();
+                let file_entry = file_utils::create_file_entry(&original_path, rel_path_str)?;
+                index.upsert(file_entry)?;
+                
+                println!("Restored: {}", rel_from_pruneyard.display());
+                restored_count += 1;
+            }
+        }
+        
+        // Remove empty pruneyard directory
+        if restored_count > 0 {
+            fs::remove_dir_all(&pruneyard_path)
+                .context("Failed to remove pruneyard directory")?;
+        }
+        
+        index.save(&repo_root)?;
+        
+        println!("Restored {} file(s) from pruneyard", restored_count);
+        return Ok(());
     }
     
+    if purge {
+        // Permanently delete pruned files
+        let pruneyard_path = repo_root.join(OCI_DIR).join("pruneyard");
+        
+        if !pruneyard_path.exists() {
+            println!("No pruneyard directory exists");
+            return Ok(());
+        }
+        
+        let count = count_files_in_dir(&pruneyard_path)?;
+        
+        // Ask for confirmation unless --force is used
+        if !force {
+            println!("This will permanently delete {} pruned file(s).", count);
+            print!("Are you sure you want to continue? (y/N): ");
+            std::io::Write::flush(&mut std::io::stdout())?;
+            
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            
+            let confirmed = input.trim().eq_ignore_ascii_case("y") || input.trim().eq_ignore_ascii_case("yes");
+            
+            if !confirmed {
+                println!("Purge cancelled");
+                return Ok(());
+            }
+        }
+        
+        fs::remove_dir_all(&pruneyard_path)
+            .context("Failed to remove pruneyard directory")?;
+        
+        println!("Permanently deleted {} pruned file(s)", count);
+        return Ok(());
+    }
+    
+    // Need source path for prune operation
+    let source_path = source
+        .ok_or_else(|| anyhow::anyhow!("Source path is required for prune operation"))?;
+    
+    // Check for pending changes
+    if has_pending_changes(&repo_root)? {
+        bail!("Cannot prune: there are pending changes. Run 'oci status' to see changes.");
+    }
+    
+    // Load local and source indices
+    let mut local_index = Index::load(&repo_root)?;
+    
+    let source_abs_path = if Path::new(&source_path).is_absolute() {
+        PathBuf::from(&source_path)
+    } else {
+        env::current_dir()?.join(&source_path)
+    };
+    
+    if !source_abs_path.exists() {
+        bail!("Source path does not exist: {}", source_abs_path.display());
+    }
+    
+    // Canonicalize both paths to compare them properly
+    let canonical_source = source_abs_path.canonicalize()
+        .context("Failed to canonicalize source path")?;
+    let canonical_local = repo_root.canonicalize()
+        .context("Failed to canonicalize local path")?;
+    
+    if canonical_source == canonical_local {
+        bail!("Cannot prune using the same index as source and local");
+    }
+    
+    let source_index = Index::load(&source_abs_path)
+        .context("Failed to load source index")?;
+    
+    // Load source ignore patterns if not disabled
+    let source_patterns = if !no_ignore {
+        ignore::load_patterns(&source_abs_path)?
+    } else {
+        Vec::new()
+    };
+    
+    // Get all files from local index
+    let local_files = local_index.get_dir_files_recursive("")?;
+    
+    // Find files to prune - store as (path, reason, in_index)
+    let mut files_to_prune: Vec<(String, String, bool)> = Vec::new();
+    
+    for local_entry in &local_files {
+        let mut should_prune = false;
+        let mut prune_reason = String::new();
+        
+        // Check if hash exists in source index
+        let source_matches = source_index.find_by_hash(&local_entry.sha256)?;
+        if !source_matches.is_empty() {
+            should_prune = true;
+            prune_reason = "duplicate".to_string();
+        }
+        
+        // Check if file matches source ignore patterns (unless --no-ignore)
+        if !no_ignore && !source_patterns.is_empty() {
+            let path = Path::new(&local_entry.path);
+            if ignore::should_ignore(path, &source_patterns) {
+                should_prune = true;
+                prune_reason = "ignored".to_string();
+            }
+        }
+        
+        if should_prune {
+            files_to_prune.push((local_entry.path.clone(), prune_reason, true));
+        }
+    }
+    
+    // Also check for files on filesystem that match source ignore patterns but aren't in local index
+    if !no_ignore && !source_patterns.is_empty() {
+        for entry in WalkDir::new(&repo_root).into_iter()
+            .filter_entry(|e| {
+                // Don't walk into .oci directory
+                if let Ok(rel) = e.path().strip_prefix(&repo_root) {
+                    let rel_str = rel.to_string_lossy();
+                    !rel_str.starts_with(".oci")
+                } else {
+                    true
+                }
+            }) {
+            let entry = entry?;
+            
+            if entry.file_type().is_file() {
+                let rel_path = entry.path().strip_prefix(&repo_root)
+                    .context("Path is outside repository")?;
+                let rel_path_str = rel_path.to_string_lossy().to_string();
+                
+                // Skip if already in our prune list
+                if files_to_prune.iter().any(|(p, _, _)| p == &rel_path_str) {
+                    continue;
+                }
+                
+                // Skip if in local index (we already checked those above)
+                if local_index.get(&rel_path_str)?.is_some() {
+                    continue;
+                }
+                
+                // Check if file matches source ignore patterns
+                if ignore::should_ignore(rel_path, &source_patterns) {
+                    files_to_prune.push((rel_path_str, "ignored".to_string(), false));
+                }
+            }
+        }
+    }
+    
+    if files_to_prune.is_empty() {
+        println!("No files to prune");
+        return Ok(());
+    }
+    
+    // Create pruneyard directory
+    let pruneyard_path = repo_root.join(OCI_DIR).join("pruneyard");
+    fs::create_dir_all(&pruneyard_path)
+        .context("Failed to create pruneyard directory")?;
+    
+    let mut pruned_count = 0;
+    let mut duplicate_count = 0;
+    let mut ignored_count = 0;
+    
+    // Move files to pruneyard
+    for (path, reason, in_index) in files_to_prune {
+        let source_file = repo_root.join(&path);
+        let dest_file = pruneyard_path.join(&path);
+        
+        // Create parent directories in pruneyard
+        if let Some(parent) = dest_file.parent() {
+            fs::create_dir_all(parent)
+                .context(format!("Failed to create directory: {}", parent.display()))?;
+        }
+        
+        // Move the file
+        fs::rename(&source_file, &dest_file)
+            .context(format!("Failed to move file: {}", source_file.display()))?;
+        
+        // Remove empty parent directories
+        remove_empty_dirs(&source_file, &repo_root)?;
+        
+        // Remove from index if it was in the index
+        if in_index {
+            local_index.remove(&path)?;
+        }
+        
+        println!("Pruned ({}): {}", reason, path);
+        pruned_count += 1;
+        
+        if reason == "duplicate" {
+            duplicate_count += 1;
+        } else if reason == "ignored" {
+            ignored_count += 1;
+        }
+    }
+    
+    local_index.save(&repo_root)?;
+    
+    // Clean up any remaining empty directories
+    let empty_dirs_removed = remove_all_empty_dirs(&repo_root)?;
+    
+    if pruned_count > 0 {
+        println!("Pruned {} file(s) to .oci/pruneyard/ ({} duplicates, {} ignored)", 
+                 pruned_count, duplicate_count, ignored_count);
+    } else {
+        println!("Pruned 0 file(s)");
+    }
+    
+    if empty_dirs_removed > 0 {
+        println!("Removed {} empty director{}", empty_dirs_removed, if empty_dirs_removed == 1 { "y" } else { "ies" });
+    }
+    
+    Ok(())
+}
+
+/// Remove the index (deinitialize)
+pub fn deinit(force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let oci_dir = repo_root.join(OCI_DIR);
+    
+    // Ask for confirmation unless --force is used
+    if !force {
+        println!("This will permanently delete the index at {}", oci_dir.display());
+        print!("Are you sure you want to continue? (y/N): ");
+        std::io::Write::flush(&mut std::io::stdout())?;
+        
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        
+        let confirmed = input.trim().eq_ignore_ascii_case("y") || input.trim().eq_ignore_ascii_case("yes");
+        
+        if !confirmed {
+            println!("Deinit cancelled");
+            return Ok(());
+        }
+    }
     
     fs::remove_dir_all(&oci_dir)
         .context("Failed to remove .oci directory")?;
@@ -421,4 +702,154 @@ fn make_relative_to_current(repo_root: &Path, current_dir: &Path, file_path: &st
         // File is outside current directory, show full path from repo root
         Ok(file_path.to_string())
     }
+}
+
+/// Check if there are any pending changes in the repository
+fn has_pending_changes(repo_root: &Path) -> Result<bool> {
+    let index = Index::load(repo_root)?;
+    let patterns = ignore::load_patterns(repo_root)?;
+    
+    // Get all files from filesystem
+    let mut fs_files = std::collections::HashSet::new();
+    
+    for entry in WalkDir::new(repo_root).into_iter()
+        .filter_entry(|e| {
+            // Convert to relative path for pattern matching
+            if let Ok(rel) = e.path().strip_prefix(repo_root) {
+                !ignore::should_ignore(rel, &patterns)
+            } else {
+                true // Don't filter if path conversion fails
+            }
+        }) {
+        let entry = entry?;
+        
+        if entry.file_type().is_file() {
+            let rel_path = entry.path().strip_prefix(repo_root)
+                .context("Path is outside repository")?;
+            fs_files.insert(rel_path.to_string_lossy().to_string());
+        }
+    }
+    
+    // Get all indexed files
+    let indexed_files = index.get_dir_files_recursive("")?;
+    
+    // Check for modified or added files
+    for fs_path in &fs_files {
+        let full_path = repo_root.join(fs_path);
+        
+        if let Some(entry) = index.get(fs_path)? {
+            // File exists in index - check if modified
+            if file_utils::has_changed(&entry, &full_path)? {
+                return Ok(true);
+            }
+        } else {
+            // File not in index - added
+            return Ok(true);
+        }
+    }
+    
+    // Check for deleted files
+    for entry in indexed_files {
+        if !fs_files.contains(&entry.path) {
+            return Ok(true);
+        }
+    }
+    
+    Ok(false)
+}
+
+/// Count files in a directory recursively
+fn count_files_in_dir(dir: &Path) -> Result<usize> {
+    let mut count = 0;
+    
+    for entry in WalkDir::new(dir) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            count += 1;
+        }
+    }
+    
+    Ok(count)
+}
+
+/// Remove empty parent directories recursively up to the repo root
+fn remove_empty_dirs(file_path: &Path, repo_root: &Path) -> Result<()> {
+    if let Some(mut parent) = file_path.parent() {
+        // Walk up the directory tree
+        while parent != repo_root && parent.starts_with(repo_root) {
+            // Try to read the directory
+            match fs::read_dir(parent) {
+                Ok(mut entries) => {
+                    // Check if directory is empty
+                    if entries.next().is_none() {
+                        // Directory is empty, remove it
+                        fs::remove_dir(parent)
+                            .context(format!("Failed to remove empty directory: {}", parent.display()))?;
+                        // Move up to parent
+                        if let Some(p) = parent.parent() {
+                            parent = p;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        // Directory is not empty, stop
+                        break;
+                    }
+                }
+                Err(_) => {
+                    // Can't read directory, stop
+                    break;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Remove all empty directories in the repository (recursive pass)
+fn remove_all_empty_dirs(repo_root: &Path) -> Result<usize> {
+    let mut removed_count = 0;
+    let mut found_empty = true;
+    
+    // Keep scanning until no more empty directories are found
+    // (needed because removing a directory might make its parent empty)
+    while found_empty {
+        found_empty = false;
+        let mut dirs_to_remove = Vec::new();
+        
+        // Collect all directories (walk depth-first, post-order)
+        // We need to collect them first, then remove, to avoid iterator invalidation
+        for entry in WalkDir::new(repo_root)
+            .min_depth(1)
+            .contents_first(true) {
+            let entry = entry?;
+            
+            // Skip .oci directory
+            if let Ok(rel) = entry.path().strip_prefix(repo_root) {
+                let rel_str = rel.to_string_lossy();
+                if rel_str.starts_with(".oci") {
+                    continue;
+                }
+            }
+            
+            if entry.file_type().is_dir() {
+                // Check if directory is empty
+                if let Ok(mut entries) = fs::read_dir(entry.path()) {
+                    if entries.next().is_none() {
+                        dirs_to_remove.push(entry.path().to_path_buf());
+                    }
+                }
+            }
+        }
+        
+        // Remove all empty directories found in this pass
+        for dir in dirs_to_remove {
+            if let Ok(()) = fs::remove_dir(&dir) {
+                removed_count += 1;
+                found_empty = true;
+            }
+        }
+    }
+    
+    Ok(removed_count)
 }
