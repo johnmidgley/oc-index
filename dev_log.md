@@ -33,7 +33,7 @@ The `oci` tool is implemented as a Rust CLI application with the following modul
 
 2. **Hash Algorithm**: SHA256 was chosen for file hashing as it provides good collision resistance and is widely used in content-addressable systems.
 
-3. **Change Detection**: Files are considered unchanged if both size and modified time match. This avoids unnecessary hashing for both status checks and commits. The `commit` command only recomputes hashes for files that are new or have changed (different size or modified time), making it efficient for incremental updates. Files that haven't changed are skipped and counted separately in the output.
+3. **Change Detection**: Files are considered unchanged if both size and modified time match. This avoids unnecessary hashing for both status checks and updates. The `update` command only recomputes hashes for files that are new or have changed (different size or modified time), making it efficient for incremental updates. Files that haven't changed are skipped and counted separately in the output.
 
 4. **Path Handling**: All paths in the index are stored relative to the repository root for portability. Display paths are made relative to the current working directory for user convenience.
 
@@ -91,7 +91,7 @@ Display summary information: total files indexed, total size, number of unique h
 ```bash
 oci prune [-n/--dry-run]
 ```
-Remove index entries for files that no longer exist on disk. Similar to `commit` but only removes deleted entries without updating existing ones. The dry-run flag would show what would be removed.
+Remove index entries for files that no longer exist on disk. Similar to `update` but only removes deleted entries without updating existing ones. The dry-run flag would show what would be removed.
 
 **5. `oci export` - Export index data**
 ```bash
@@ -130,13 +130,13 @@ For a modified file, show a detailed comparison between the indexed version and 
 ```bash
 oci history [<file>]
 ```
-If we add a commit history feature, this could show how files have changed over time (would require storing historical index snapshots).
+If we add an update history feature, this could show how files have changed over time (would require storing historical index snapshots).
 
 ### Implementation Notes
 
 - **duplicates** and **verify** provide immediate practical value aligned with the tool's core purpose
 - **stats** would be quick to implement and provides useful overview information
-- **prune** complements the existing `commit` command for index maintenance
+- **prune** complements the existing `update` command for index maintenance
 - **export** enables integration with other tools and workflows
 - Commands like **compare** and **tree** build on the existing data structures
 - **history** would require architectural changes to store multiple index versions

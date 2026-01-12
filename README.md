@@ -11,8 +11,8 @@ oci init
 # Add some files
 echo "Hello, world!" > test.txt
 
-# Commit files to the index
-oci commit
+# Update the index with the files
+oci update
 
 # List indexed files
 oci ls
@@ -85,15 +85,15 @@ For each file, ```path``` should be relative to where the command was called.
 
  Without the `-r` option, only status for the current dicrectory will be displayed. With the `-r` option, the current directory and all subdirectories will be displayed.
 
-## commit
+## update
 
-To commit any changes to the index, which means updating any fields in the index that have changed (e.g. sha256) call
+To update the index with any changes from the filesystem, which means updating any fields in the index that have changed (e.g. sha256) call
 
-```oci commit [pattern]```
+```oci update [pattern]```
 
-If `pattern` is a file, that single file is updated in the index. If `pattern` is a directory, all files that have changed in that directory and any sub-directories ( recursively) are updated in the index. If `pattern` is ommited, the repository root is assumed. 
+If `pattern` is a file, that single file is updated in the index. If `pattern` is a directory, all files that have changed in that directory and any sub-directories (recursively) are updated in the index. If `pattern` is omitted, the repository root is assumed. 
 
-`commit` is done efficiently, only computing hashes for files that have changed, skipping any files that have not changed (i.e. num_bytes and modified haven't changed). When files are skipped, a summary is displayed showing how many files were updated versus skipped.
+`update` is done efficiently, only computing hashes for files that have changed, skipping any files that have not changed (i.e. num_bytes and modified haven't changed). When files are skipped, a summary is displayed showing how many files were updated versus skipped.
 
 ## ls
 

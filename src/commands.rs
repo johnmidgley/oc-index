@@ -150,8 +150,8 @@ pub fn status(recursive: bool) -> Result<()> {
     Ok(())
 }
 
-/// Commit changes to the index
-pub fn commit(pattern: Option<String>) -> Result<()> {
+/// Update the index with changes from the filesystem
+pub fn update(pattern: Option<String>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let current_dir = env::current_dir()?;
     let mut index = Index::load(&repo_root)?;

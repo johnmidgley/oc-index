@@ -32,9 +32,9 @@ enum Commands {
         r: bool,
     },
     
-    /// Commit changes to the index
-    Commit {
-        /// Pattern to commit (file, directory, or glob pattern)
+    /// Update the index with changes from the filesystem
+    Update {
+        /// Pattern to update (file, directory, or glob pattern)
         pattern: Option<String>,
     },
     
@@ -66,7 +66,7 @@ fn main() -> Result<()> {
         Commands::Init => commands::init(),
         Commands::Ignore { pattern } => commands::ignore(pattern),
         Commands::Status { r } => commands::status(r),
-        Commands::Commit { pattern } => commands::commit(pattern),
+        Commands::Update { pattern } => commands::update(pattern),
         Commands::Ls { r } => commands::ls(r),
         Commands::Grep { hash } => commands::grep(&hash),
         Commands::Rm { f } => commands::rm(f),

@@ -70,7 +70,7 @@ fn test_init_fails_if_already_exists() {
 }
 
 #[test]
-fn test_commit_and_ls() {
+fn test_update_and_ls() {
     let temp_dir = TempDir::new().unwrap();
     run_oci(&["init"], temp_dir.path());
     
@@ -78,8 +78,8 @@ fn test_commit_and_ls() {
     fs::write(temp_dir.path().join("test1.txt"), "hello world").unwrap();
     fs::write(temp_dir.path().join("test2.txt"), "goodbye world").unwrap();
     
-    // Commit files
-    let (stdout, _, exit_code) = run_oci(&["commit"], temp_dir.path());
+    // Update index with files
+    let (stdout, _, exit_code) = run_oci(&["update"], temp_dir.path());
     assert_eq!(exit_code, 0);
     assert!(stdout.contains("Updated 2 file(s)"));
     
@@ -95,9 +95,9 @@ fn test_status_shows_changes() {
     let temp_dir = TempDir::new().unwrap();
     run_oci(&["init"], temp_dir.path());
     
-    // Create and commit a file
+    // Create and update index with file
     fs::write(temp_dir.path().join("test.txt"), "original").unwrap();
-    run_oci(&["commit"], temp_dir.path());
+    run_oci(&["update"], temp_dir.path());
     
     // Modify the file
     fs::write(temp_dir.path().join("test.txt"), "modified").unwrap();
@@ -117,7 +117,7 @@ fn test_grep_finds_files_by_hash() {
     // Create files with same content
     fs::write(temp_dir.path().join("file1.txt"), "same content").unwrap();
     fs::write(temp_dir.path().join("file2.txt"), "same content").unwrap();
-    run_oci(&["commit"], temp_dir.path());
+    run_oci(&["update"], temp_dir.path());
     
     // Get the hash from ls output
     let (stdout, _, _) = run_oci(&["ls"], temp_dir.path());
@@ -146,8 +146,8 @@ fn test_ignore_excludes_files() {
     // Add ignore pattern
     run_oci(&["ignore", "*.log"], temp_dir.path());
     
-    // Commit all files
-    let (stdout, _, exit_code) = run_oci(&["commit"], temp_dir.path());
+    // Update index with all files
+    let (stdout, _, exit_code) = run_oci(&["update"], temp_dir.path());
     assert_eq!(exit_code, 0);
     // Should only update 1 file (the .txt file)
     assert!(stdout.contains("Updated 1 file(s)"));
@@ -187,8 +187,8 @@ fn test_recursive_operations() {
     fs::write(temp_dir.path().join("root.txt"), "root").unwrap();
     fs::write(temp_dir.path().join("subdir/nested.txt"), "nested").unwrap();
     
-    // Commit all files
-    run_oci(&["commit"], temp_dir.path());
+    // Update index with all files
+    run_oci(&["update"], temp_dir.path());
     
     // List without -r should only show root.txt
     let (stdout, _, _) = run_oci(&["ls"], temp_dir.path());
@@ -202,7 +202,7 @@ fn test_recursive_operations() {
 }
 
 #[test]
-fn test_commit_skips_unchanged_files() {
+fn test_update_skips_unchanged_files() {
     let temp_dir = TempDir::new().unwrap();
     run_oci(&["init"], temp_dir.path());
     
@@ -210,13 +210,13 @@ fn test_commit_skips_unchanged_files() {
     fs::write(temp_dir.path().join("file1.txt"), "content1").unwrap();
     fs::write(temp_dir.path().join("file2.txt"), "content2").unwrap();
     
-    // First commit - should update both files
-    let (stdout, _, exit_code) = run_oci(&["commit"], temp_dir.path());
+    // First update - should update both files
+    let (stdout, _, exit_code) = run_oci(&["update"], temp_dir.path());
     assert_eq!(exit_code, 0);
     assert!(stdout.contains("Updated 2 file(s)"));
     
-    // Second commit without changes - should skip both files
-    let (stdout, _, exit_code) = run_oci(&["commit"], temp_dir.path());
+    // Second update without changes - should skip both files
+    let (stdout, _, exit_code) = run_oci(&["update"], temp_dir.path());
     assert_eq!(exit_code, 0);
     assert!(stdout.contains("Updated 0 file(s)"));
     assert!(stdout.contains("Skipped 2 unchanged file(s)"));
@@ -225,8 +225,8 @@ fn test_commit_skips_unchanged_files() {
     std::thread::sleep(std::time::Duration::from_millis(10)); // Ensure modified time changes
     fs::write(temp_dir.path().join("file1.txt"), "modified content").unwrap();
     
-    // Third commit - should update only the modified file
-    let (stdout, _, exit_code) = run_oci(&["commit"], temp_dir.path());
+    // Third update - should update only the modified file
+    let (stdout, _, exit_code) = run_oci(&["update"], temp_dir.path());
     assert_eq!(exit_code, 0);
     assert!(stdout.contains("Updated 1 file(s)"));
     assert!(stdout.contains("Skipped 1 unchanged file(s)"));
