@@ -167,26 +167,42 @@ pub fn update(pattern: Option<String>) -> Result<()> {
         bail!("Path does not exist: {}", target_path.display());
     }
     
+    let mut added_count = 0;
     let mut updated_count = 0;
+    let mut removed_count = 0;
     let mut skipped_count = 0;
     
     if target_path.is_file() {
-        // Commit single file
+        // Update single file
         let rel_path = target_path.strip_prefix(&repo_root)
             .context("Path is outside repository")?;
         let rel_path_str = rel_path.to_string_lossy().to_string();
         
         if !ignore::should_ignore(&target_path, &patterns) {
+            let is_new = index.get(&rel_path_str)?.is_none();
+            
             if should_update_file(&index, &target_path, &rel_path_str)? {
+                let display_path = make_relative_to_current(&repo_root, &current_dir, &rel_path_str)?;
+                let prefix = if is_new { "+" } else { "U" };
+                println!("{} {}", prefix, display_path);
+                
                 let entry = file_utils::create_file_entry(&target_path, rel_path_str)?;
                 index.upsert(entry)?;
-                updated_count += 1;
+                
+                if is_new {
+                    added_count += 1;
+                } else {
+                    updated_count += 1;
+                }
             } else {
                 skipped_count += 1;
             }
         }
     } else {
-        // Commit directory recursively
+        // Update directory recursively
+        // First, collect all files that exist on disk
+        let mut fs_files = std::collections::HashSet::new();
+        
         for entry in WalkDir::new(&target_path).into_iter()
             .filter_entry(|e| !ignore::should_ignore(e.path(), &patterns)) {
             let entry = entry?;
@@ -195,20 +211,57 @@ pub fn update(pattern: Option<String>) -> Result<()> {
                 let rel_path = entry.path().strip_prefix(&repo_root)
                     .context("Path is outside repository")?;
                 let rel_path_str = rel_path.to_string_lossy().to_string();
+                fs_files.insert(rel_path_str.clone());
+                
+                let is_new = index.get(&rel_path_str)?.is_none();
                 
                 if should_update_file(&index, entry.path(), &rel_path_str)? {
+                    let display_path = make_relative_to_current(&repo_root, &current_dir, &rel_path_str)?;
+                    let prefix = if is_new { "+" } else { "U" };
+                    println!("{} {}", prefix, display_path);
+                    
                     let file_entry = file_utils::create_file_entry(entry.path(), rel_path_str)?;
                     index.upsert(file_entry)?;
-                    updated_count += 1;
+                    
+                    if is_new {
+                        added_count += 1;
+                    } else {
+                        updated_count += 1;
+                    }
                 } else {
                     skipped_count += 1;
                 }
             }
         }
+        
+        // Now check for deleted files in the index
+        let rel_target = target_path.strip_prefix(&repo_root)
+            .context("Path is outside repository")?;
+        let rel_target_str = rel_target.to_string_lossy().to_string();
+        
+        let indexed_files = index.get_dir_files_recursive(&rel_target_str)?;
+        
+        for indexed_entry in indexed_files {
+            if !fs_files.contains(&indexed_entry.path) {
+                // File is in index but not on disk - remove it
+                let display_path = make_relative_to_current(&repo_root, &current_dir, &indexed_entry.path)?;
+                println!("- {}", display_path);
+                index.remove(&indexed_entry.path)?;
+                removed_count += 1;
+            }
+        }
     }
     
     index.save(&repo_root)?;
-    println!("Updated {} file(s) in the index", updated_count);
+    
+    let total_changed = added_count + updated_count + removed_count;
+    if total_changed > 0 {
+        println!("Updated {} file(s) in the index ({} added, {} updated, {} removed)", 
+                 total_changed, added_count, updated_count, removed_count);
+    } else {
+        println!("Updated 0 file(s) in the index");
+    }
+    
     if skipped_count > 0 {
         println!("Skipped {} unchanged file(s)", skipped_count);
     }

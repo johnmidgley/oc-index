@@ -13,6 +13,8 @@ echo "Hello, world!" > test.txt
 
 # Update the index with the files
 oci update
+# Output: + test.txt
+#         Updated 1 file(s) in the index (1 added, 0 updated, 0 removed)
 
 # List indexed files
 oci ls
@@ -93,7 +95,32 @@ To update the index with any changes from the filesystem, which means updating a
 
 If `pattern` is a file, that single file is updated in the index. If `pattern` is a directory, all files that have changed in that directory and any sub-directories (recursively) are updated in the index. If `pattern` is omitted, the repository root is assumed. 
 
-`update` is done efficiently, only computing hashes for files that have changed, skipping any files that have not changed (i.e. num_bytes and modified haven't changed). When files are skipped, a summary is displayed showing how many files were updated versus skipped.
+`update` is done efficiently, only computing hashes for files that have changed, skipping any files that have not changed (i.e. num_bytes and modified haven't changed).
+
+### Output Format
+
+Each file being processed is displayed with a prefix indicating the operation:
+
+- `+` - File is being **added** to the index (new file)
+- `U` - File is being **updated** (hash or metadata changed)
+- `-` - File is being **removed** from the index (deleted from filesystem)
+
+Example output:
+```
++ file1.txt
++ file2.txt
+U existing_file.txt
+- deleted_file.txt
+Updated 4 file(s) in the index (2 added, 1 updated, 1 removed)
+Skipped 5 unchanged file(s)
+```
+
+The summary line shows:
+- Total number of files changed (added + updated + removed)
+- Breakdown of additions, updates, and removals
+- Number of unchanged files that were skipped
+
+Note: The `update` command will automatically remove files from the index that no longer exist on the filesystem within the target directory.
 
 ## ls
 

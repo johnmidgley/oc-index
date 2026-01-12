@@ -83,6 +83,15 @@ impl Index {
         Ok(())
     }
 
+    /// Remove a file entry from the index
+    pub fn remove(&mut self, path: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM files WHERE path = ?1",
+            params![path],
+        ).context("Failed to remove file entry")?;
+        Ok(())
+    }
+
     /// Get a file entry
     pub fn get(&self, path: &str) -> Result<Option<FileEntry>> {
         let result = self.conn.query_row(
