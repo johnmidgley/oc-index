@@ -27,6 +27,9 @@ enum Commands {
     
     /// Check for differences between the index and filesystem
     Status {
+        /// Path to check (file or directory)
+        path: Option<String>,
+        
         /// Recurse into subdirectories
         #[arg(short)]
         r: bool,
@@ -65,7 +68,7 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Init => commands::init(),
         Commands::Ignore { pattern } => commands::ignore(pattern),
-        Commands::Status { r } => commands::status(r),
+        Commands::Status { path, r } => commands::status(path, r),
         Commands::Update { pattern } => commands::update(pattern),
         Commands::Ls { r } => commands::ls(r),
         Commands::Grep { hash } => commands::grep(&hash),

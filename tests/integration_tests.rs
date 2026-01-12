@@ -105,7 +105,7 @@ fn test_status_shows_changes() {
     // Check status
     let (stdout, _, exit_code) = run_oci(&["status"], temp_dir.path());
     assert_eq!(exit_code, 0);
-    assert!(stdout.contains("M"));
+    assert!(stdout.contains("U"));
     assert!(stdout.contains("test.txt"));
 }
 

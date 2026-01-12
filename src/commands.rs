@@ -75,39 +75,68 @@ pub fn ignore(pattern: Option<String>) -> Result<()> {
 }
 
 /// Check status of files
-pub fn status(recursive: bool) -> Result<()> {
+pub fn status(pattern: Option<String>, recursive: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let current_dir = env::current_dir()?;
     let index = Index::load(&repo_root)?;
     let patterns = ignore::load_patterns(&repo_root)?;
     
-    let rel_current = current_dir.strip_prefix(&repo_root)
-        .context("Current directory is outside repository")?;
-    let rel_current_str = rel_current.to_string_lossy().to_string();
+    // Determine what to scan based on arguments
+    let (scan_dir, scan_rel_path, is_recursive) = if let Some(p) = pattern {
+        // Path argument provided
+        let target_path = current_dir.join(&p);
+        if !target_path.exists() {
+            bail!("Path does not exist: {}", target_path.display());
+        }
+        
+        let rel_path = target_path.strip_prefix(&repo_root)
+            .context("Path is outside repository")?;
+        let rel_path_str = rel_path.to_string_lossy().to_string();
+        
+        // If it's a file, always non-recursive; if directory, use recursive flag
+        let is_recursive = target_path.is_dir() && recursive;
+        (target_path, rel_path_str, is_recursive)
+    } else if recursive {
+        // No path, but -r flag: scan from current directory recursively
+        let rel_current = current_dir.strip_prefix(&repo_root)
+            .context("Current directory is outside repository")?;
+        (current_dir.clone(), rel_current.to_string_lossy().to_string(), true)
+    } else {
+        // No path, no -r flag: scan entire repository from root
+        (repo_root.clone(), String::new(), true)
+    };
     
     // Get all files from filesystem
     let mut fs_files = std::collections::HashSet::new();
     
-    let walker = if recursive {
-        WalkDir::new(&current_dir).into_iter()
+    if scan_dir.is_file() {
+        // Single file
+        let rel_path = scan_dir.strip_prefix(&repo_root)
+            .context("Path is outside repository")?;
+        fs_files.insert(rel_path.to_string_lossy().to_string());
     } else {
-        WalkDir::new(&current_dir).max_depth(1).into_iter()
-    };
-    
-    for entry in walker.filter_entry(|e| !ignore::should_ignore(e.path(), &patterns)) {
-        let entry = entry?;
-        if entry.file_type().is_file() {
-            let rel_path = entry.path().strip_prefix(&repo_root)
-                .context("Path is outside repository")?;
-            fs_files.insert(rel_path.to_string_lossy().to_string());
+        // Directory
+        let walker = if is_recursive {
+            WalkDir::new(&scan_dir).into_iter()
+        } else {
+            WalkDir::new(&scan_dir).max_depth(1).into_iter()
+        };
+        
+        for entry in walker.filter_entry(|e| !ignore::should_ignore(e.path(), &patterns)) {
+            let entry = entry?;
+            if entry.file_type().is_file() {
+                let rel_path = entry.path().strip_prefix(&repo_root)
+                    .context("Path is outside repository")?;
+                fs_files.insert(rel_path.to_string_lossy().to_string());
+            }
         }
     }
     
     // Get indexed files for comparison
-    let indexed_files: Vec<_> = if recursive {
-        index.get_dir_files_recursive(&rel_current_str)?
+    let indexed_files: Vec<_> = if is_recursive {
+        index.get_dir_files_recursive(&scan_rel_path)?
     } else {
-        index.get_dir_files(&rel_current_str)?
+        index.get_dir_files(&scan_rel_path)?
     };
     
     let mut has_changes = false;
@@ -121,7 +150,7 @@ pub fn status(recursive: bool) -> Result<()> {
             if file_utils::has_changed(&entry, &full_path)? {
                 // Display relative to current directory
                 let display_path = make_relative_to_current(&repo_root, &current_dir, fs_path)?;
-                println!("M {}", file_utils::format_entry(&create_entry_with_path(&full_path, display_path)?));
+                println!("U {}", file_utils::format_entry(&create_entry_with_path(&full_path, display_path)?));
                 has_changes = true;
             }
         } else {

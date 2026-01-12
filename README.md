@@ -72,10 +72,12 @@ where `pattern` is optional and can be a file, directory, or arbirary path patte
 To check for differences between the index and the file system, use
 
 ```
-oci status
+oci status [path] [-r]
 ```
 
-A file is considered not changed if its size and last modified time match the index. The path of any file that has chnaged is output with a '+' prefix to indicate that it exists in the filessytem but not the index, a '-' prefix to indicate it exists in the index but not the filesystem, and an 'M' prefix to indicate the the filesystem version has been modified from what the index contains. 
+Where `path` is an optional file or directory to check. If omitted, the entire repository is checked.
+
+A file is considered not changed if its size and last modified time match the index. The path of any file that has changed is output with a '+' prefix to indicate that it exists in the filesystem but not the index, a '-' prefix to indicate it exists in the index but not the filesystem, and a 'U' prefix to indicate that the filesystem version has been modified from what the index contains. 
 
 Files are output in a human readable format with the following fields
 
@@ -83,9 +85,14 @@ Files are output in a human readable format with the following fields
 num_bytes modified sha256 path
 ```
 
-For each file, ```path``` should be relative to where the command was called. 
+For each file, ```path``` is displayed relative to where the command was called. 
 
- Without the `-r` option, only status for the current dicrectory will be displayed. With the `-r` option, the current directory and all subdirectories will be displayed.
+### Behavior
+
+- `oci status` - Checks the entire repository from the root recursively
+- `oci status <path>` - Checks only the specified file or directory (non-recursive for directories)
+- `oci status <path> -r` - Checks the specified directory and all subdirectories recursively
+- `oci status -r` - Checks from the current directory and its subdirectories recursively
 
 ## update
 
