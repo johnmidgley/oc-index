@@ -42,6 +42,9 @@ pub fn init() -> Result<()> {
     let index = Index::new()?;
     index.save(&current_dir)?;
     
+    // Initialize .ocignore with default patterns
+    ignore::init_ignore_file(&current_dir)?;
+    
     println!("Initialized empty oci index in {}", oci_dir.display());
     Ok(())
 }
@@ -122,7 +125,14 @@ pub fn status(pattern: Option<String>, recursive: bool) -> Result<()> {
             WalkDir::new(&scan_dir).max_depth(1).into_iter()
         };
         
-        for entry in walker.filter_entry(|e| !ignore::should_ignore(e.path(), &patterns)) {
+        for entry in walker.filter_entry(|e| {
+            // Convert to relative path for pattern matching
+            if let Ok(rel) = e.path().strip_prefix(&repo_root) {
+                !ignore::should_ignore(rel, &patterns)
+            } else {
+                true // Don't filter if path conversion fails
+            }
+        }) {
             let entry = entry?;
             if entry.file_type().is_file() {
                 let rel_path = entry.path().strip_prefix(&repo_root)
@@ -207,7 +217,7 @@ pub fn update(pattern: Option<String>) -> Result<()> {
             .context("Path is outside repository")?;
         let rel_path_str = rel_path.to_string_lossy().to_string();
         
-        if !ignore::should_ignore(&target_path, &patterns) {
+        if !ignore::should_ignore(rel_path, &patterns) {
             let is_new = index.get(&rel_path_str)?.is_none();
             
             if should_update_file(&index, &target_path, &rel_path_str)? {
@@ -233,7 +243,14 @@ pub fn update(pattern: Option<String>) -> Result<()> {
         let mut fs_files = std::collections::HashSet::new();
         
         for entry in WalkDir::new(&target_path).into_iter()
-            .filter_entry(|e| !ignore::should_ignore(e.path(), &patterns)) {
+            .filter_entry(|e| {
+                // Convert to relative path for pattern matching
+                if let Ok(rel) = e.path().strip_prefix(&repo_root) {
+                    !ignore::should_ignore(rel, &patterns)
+                } else {
+                    true // Don't filter if path conversion fails
+                }
+            }) {
             let entry = entry?;
             
             if entry.file_type().is_file() {

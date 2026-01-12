@@ -43,13 +43,20 @@ The `oci` tool is implemented as a Rust CLI application with the following modul
 
 4. **Path Handling**: All paths in the index are stored relative to the repository root for portability. Display paths are made relative to the current working directory for user convenience.
 
-5. **Ignore Patterns**: Uses the `glob` crate for pattern matching, supporting wildcards similar to `.gitignore`.
+5. **Ignore Patterns**: Uses the `glob` crate for pattern matching, supporting wildcards similar to `.gitignore`. During initialization (`oci init`), a `.ocignore` file is created with conservative default patterns for common intermediate/derived files. These defaults are written to the file (not hardcoded in the application), making them transparent and editable by users. The patterns favor specificity over breadth to avoid false positives:
+   - Package manager dependencies and caches (e.g., `node_modules/`, `.npm/`)
+   - Tool-specific caches (e.g., `.pytest_cache/`, `.mypy_cache/`)
+   - Intermediate compiled files (e.g., `*.o`, `*.class`, `*.pyc`)
+   - Framework-specific build directories (e.g., `.next/`, `.nuxt/`)
+   - Editor temporary files (e.g., `*.swp`, `*~`)
+   
+   Generic directory names like `build/`, `dist/`, `bin/`, and `out/` are intentionally NOT included in defaults as they could be legitimate organizational directories. Similarly, final artifacts (executables, libraries) and IDE project files are not included. Users can modify `.ocignore` directly or use `oci ignore [pattern]` to add custom patterns.
 
 ### Testing
 
 The project includes:
-- 7 unit tests covering core functionality (index operations, hashing, pattern matching)
-- 8 integration tests that verify end-to-end command behavior
+- 10 unit tests covering core functionality (index operations, hashing, pattern matching)
+- 10 integration tests that verify end-to-end command behavior
 
 All tests pass and cover the major use cases and edge cases.
 

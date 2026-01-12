@@ -70,6 +70,25 @@ fn test_init_fails_if_already_exists() {
 }
 
 #[test]
+fn test_init_creates_ocignore_with_defaults() {
+    let temp_dir = TempDir::new().unwrap();
+    let (_, _, exit_code) = run_oci(&["init"], temp_dir.path());
+    
+    assert_eq!(exit_code, 0);
+    
+    // Verify .ocignore file exists
+    let ocignore_path = temp_dir.path().join(".oci/.ocignore");
+    assert!(ocignore_path.exists(), ".ocignore file should be created");
+    
+    // Verify it contains default patterns
+    let contents = fs::read_to_string(&ocignore_path).unwrap();
+    assert!(contents.contains("node_modules/"), "Should contain node_modules pattern");
+    assert!(contents.contains("*.pyc"), "Should contain .pyc pattern");
+    assert!(contents.contains(".DS_Store"), "Should contain .DS_Store pattern");
+    assert!(contents.contains("# Default ignore patterns"), "Should contain header comment");
+}
+
+#[test]
 fn test_update_and_ls() {
     let temp_dir = TempDir::new().unwrap();
     run_oci(&["init"], temp_dir.path());

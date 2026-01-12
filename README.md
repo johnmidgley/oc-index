@@ -42,7 +42,7 @@ To initialize `oci`, switch to the directory you want to index (the repository r
 oci init
 ```
 
-This will first check that there is not an existing index (located in the .oci directory). If the directory already exists, the user is warned with an error and the tool exits. If the directory does not exist, then an empty index is created. 
+This will first check that there is not an existing index (located in the .oci directory). If the directory already exists, the user is warned with an error and the tool exits. If the directory does not exist, then an empty index is created along with a `.ocignore` file containing default ignore patterns (see the [ignore](#ignore) section below). 
 
 The index has the following information for each file it tracks:
 
@@ -65,7 +65,53 @@ For files that should be ignored by oci (i.e. not included in the index and igno
 oci ignore [pattern]
 ```
 
-where `pattern` is optional and can be a file, directory, or arbirary path pattern (like git). Patterns that are to be ignored are stored in the .oci directory in `.ocignore`. If `pattern` is a relative path, it is expanded to be a path from the root of the repository before added to the ignore file. If `pattern` is ommited, then the current directory is used. 
+where `pattern` is optional and can be a file, directory, or arbirary path pattern (like git). Patterns that are to be ignored are stored in the `.oci/.ocignore` file. If `pattern` is a relative path, it is expanded to be a path from the root of the repository before added to the ignore file. If `pattern` is ommited, then the current directory is used.
+
+### Default Ignore Patterns
+
+When you run `oci init`, a `.ocignore` file is created with a conservative set of default ignore patterns for common intermediate and derived files. **You can edit this file directly** to add, remove, or modify patterns as needed for your project.
+
+The default patterns include:
+
+**Package Manager Dependencies:**
+- `node_modules/`, `bower_components/`, `jspm_packages/`
+
+**Python Intermediate Files:**
+- `__pycache__/`, `*.pyc`, `*.pyo`, `*.pyd`, `*.egg-info/`, `.eggs/`
+
+**Python Virtual Environments (dot-prefixed only):**
+- `.venv/`, `.env/`
+
+**Python Tool Caches:**
+- `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.tox/`
+
+**Intermediate Compiled Files:**
+- `*.o`, `*.obj`, `*.class`
+
+**Package Manager Caches:**
+- `.npm/`, `.yarn/`, `.gradle/`, `.pnpm-store/`
+
+**Framework-Specific Build Directories:**
+- `.next/`, `.nuxt/`, `.svelte-kit/`, `.angular/`, `.cache/`
+
+**Editor Temporary Files:**
+- `*.swp`, `*.swo`, `*.swn`, `*~`
+
+**OS Metadata Files:**
+- `.DS_Store`, `Thumbs.db`, `desktop.ini`
+
+**Test Coverage Output:**
+- `.coverage`, `.nyc_output/`, `htmlcov/`, `__coverage__/`
+
+The `.oci` directory itself is always ignored regardless of patterns in `.ocignore`.
+
+**Important Notes:**
+- The default list is **intentionally conservative** to avoid accidentally ignoring legitimate files
+- Generic directory names like `build/`, `dist/`, `bin/`, and `out/` are **NOT** included in the defaults
+- Final build artifacts (like `*.exe`, `*.dll`, `*.so`, `*.jar`) are **NOT** included in the defaults
+- IDE project files (like `.vscode/`, `.idea/`) are **NOT** included in the defaults
+- You can remove any default patterns from `.ocignore` if they don't fit your use case
+- You can add custom patterns using `oci ignore [pattern]` or by editing `.ocignore` directly 
 
 ## status
 
