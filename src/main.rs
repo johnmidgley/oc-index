@@ -54,8 +54,8 @@ enum Commands {
         hash: String,
     },
     
-    /// Remove the index
-    Rm {
+    /// Remove the index (opposite of init)
+    Deinit {
         /// Force removal (required)
         #[arg(short)]
         f: bool,
@@ -72,6 +72,6 @@ fn main() -> Result<()> {
         Commands::Update { pattern } => commands::update(pattern),
         Commands::Ls { r } => commands::ls(r),
         Commands::Grep { hash } => commands::grep(&hash),
-        Commands::Rm { f } => commands::rm(f),
+        Commands::Deinit { f } => commands::deinit(f),
     }
 }

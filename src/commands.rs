@@ -352,10 +352,10 @@ pub fn grep(hash: &str) -> Result<()> {
     Ok(())
 }
 
-/// Remove the index
-pub fn rm(force: bool) -> Result<()> {
+/// Remove the index (deinitialize)
+pub fn deinit(force: bool) -> Result<()> {
     if !force {
-        bail!("The -f flag is required to remove the index");
+        bail!("The -f flag is required to deinitialize the index");
     }
     
     let repo_root = find_repo_root()?;
@@ -364,7 +364,7 @@ pub fn rm(force: bool) -> Result<()> {
     fs::remove_dir_all(&oci_dir)
         .context("Failed to remove .oci directory")?;
     
-    println!("Removed index at {}", oci_dir.display());
+    println!("Deinitialized oci index at {}", oci_dir.display());
     Ok(())
 }
 

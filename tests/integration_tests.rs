@@ -159,21 +159,21 @@ fn test_ignore_excludes_files() {
 }
 
 #[test]
-fn test_rm_removes_index() {
+fn test_deinit_removes_index() {
     let temp_dir = TempDir::new().unwrap();
     run_oci(&["init"], temp_dir.path());
     
     assert!(temp_dir.path().join(".oci").exists());
     
-    // Remove without -f should fail
-    let (_, stderr, exit_code) = run_oci(&["rm"], temp_dir.path());
+    // Deinit without -f should fail
+    let (_, stderr, exit_code) = run_oci(&["deinit"], temp_dir.path());
     assert_ne!(exit_code, 0);
     assert!(stderr.contains("-f flag is required"));
     
-    // Remove with -f should succeed
-    let (stdout, _, exit_code) = run_oci(&["rm", "-f"], temp_dir.path());
+    // Deinit with -f should succeed
+    let (stdout, _, exit_code) = run_oci(&["deinit", "-f"], temp_dir.path());
     assert_eq!(exit_code, 0);
-    assert!(stdout.contains("Removed index"));
+    assert!(stdout.contains("Deinitialized"));
     assert!(!temp_dir.path().join(".oci").exists());
 }
 

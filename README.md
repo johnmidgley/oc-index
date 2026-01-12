@@ -29,7 +29,7 @@ oci grep <hash>
 oci ignore "*.log"
 
 # Remove the index
-oci rm -f
+oci deinit -f
 ```
 
 The following sections describe the sub-commands available in detail.
@@ -153,14 +153,14 @@ oci grep <hash>
 
 Where `<hash>` is the SHA256 hash of the file content you're looking for. This will list all files in the index with that hash. 
 
-## rm
+## deinit
 
-To remove an index, call
+To deinitialize and remove an index, call
 
 ```
-oci rm -f
+oci deinit -f
 ```
 
 The `-f` flag is required for safety, so if it's not present the tool returns an error to the user.
 
-This deletes the .oci directory.
+This deletes the .oci directory, which is the opposite of `init`.
