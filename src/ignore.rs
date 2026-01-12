@@ -41,6 +41,10 @@ __pycache__/
 *.obj
 *.class
 
+# Rust build output
+target/debug/
+target/release/
+
 # Package manager cache directories
 .npm/
 .yarn/
@@ -72,6 +76,58 @@ desktop.ini
 .nyc_output/
 htmlcov/
 __coverage__/
+
+# macOS system directories
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+.TemporaryItems/
+.DocumentRevisions-V100/
+
+# Trash directories (cross-platform)
+.Trash/
+$RECYCLE.BIN/
+
+# iTunes/Music app caches and derived files
+iTunes/Album Artwork/Cache/
+Music/Album Artwork/Cache/
+
+# Photos app derived files (thumbnails, previews, proxies)
+# Note: Only derivatives, not originals
+*.photoslibrary/resources/derivatives/
+*.photoslibrary/resources/proxies/
+*.photoslibrary/private/
+*.photoslibrary/scopes/
+
+# Browser caches
+Library/Caches/Google/Chrome/
+Library/Caches/Firefox/
+Library/Caches/Microsoft Edge/
+Library/Caches/Safari/
+AppData/Local/Google/Chrome/User Data/*/Cache/
+AppData/Local/Mozilla/Firefox/Profiles/*/cache2/
+AppData/Local/Microsoft/Edge/User Data/*/Cache/
+
+# Xcode derived data and build artifacts
+Library/Developer/Xcode/DerivedData/
+Library/Developer/Xcode/Archives/
+
+# Docker
+Library/Containers/com.docker.docker/
+
+# Cloud storage caches
+.dropbox.cache/
+Library/CloudStorage/.cache/
+Library/Application Support/Google/DriveFS/cache/
+
+# Mail app caches
+Library/Mail/V*/MailData/Envelope Index*
+Library/Mail/V*/MailData/AvailableFeeds/
+
+# macOS general cache location
+Library/Caches/
+AppData/Local/Temp/
+AppData/Local/Cache/
 "#.to_string()
 }
 
@@ -159,11 +215,33 @@ pub fn should_ignore(path: &Path, patterns: &[String]) -> bool {
                 }
             }
             
-            // For directory patterns, check if path starts with the pattern
+            // For directory patterns (ending with /), check if any parent matches
             if pattern.ends_with('/') {
+                // Check if the path or any of its parent directories match the pattern
                 let dir_pattern = pattern.trim_end_matches('/');
+                
+                // Try matching with glob for patterns like *.photoslibrary/resources/derivatives
+                if let Ok(glob) = Pattern::new(&format!("{}/**", dir_pattern)) {
+                    if glob.matches(&path_str) {
+                        return true;
+                    }
+                }
+                
+                // Also check literal directory prefix match for simple patterns
                 if path_str.starts_with(&format!("{}/", dir_pattern)) {
                     return true;
+                }
+                
+                // Check each parent component
+                let mut current = path;
+                while let Some(parent) = current.parent() {
+                    let parent_str = parent.to_string_lossy();
+                    if let Ok(glob) = Pattern::new(dir_pattern) {
+                        if glob.matches(&parent_str) {
+                            return true;
+                        }
+                    }
+                    current = parent;
                 }
             }
         }

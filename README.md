@@ -88,6 +88,9 @@ The default patterns include:
 **Intermediate Compiled Files:**
 - `*.o`, `*.obj`, `*.class`
 
+**Rust Build Output:**
+- `target/debug/`, `target/release/`
+
 **Package Manager Caches:**
 - `.npm/`, `.yarn/`, `.gradle/`, `.pnpm-store/`
 
@@ -102,6 +105,39 @@ The default patterns include:
 
 **Test Coverage Output:**
 - `.coverage`, `.nyc_output/`, `htmlcov/`, `__coverage__/`
+
+**macOS System Directories:**
+- `.Spotlight-V100/`, `.Trashes/`, `.fseventsd/`, `.TemporaryItems/`, `.DocumentRevisions-V100/`
+
+**Trash Directories:**
+- `.Trash/`, `$RECYCLE.BIN/`
+
+**iTunes/Music App Caches:**
+- `iTunes/Album Artwork/Cache/`, `Music/Album Artwork/Cache/`
+
+**Photos App Derived Files:**
+- `*.photoslibrary/resources/derivatives/`, `*.photoslibrary/resources/proxies/`
+- `*.photoslibrary/private/`, `*.photoslibrary/scopes/`
+- Note: Originals in `*.photoslibrary/originals/` are NOT ignored
+
+**Browser Caches:**
+- Chrome, Firefox, Safari, Edge cache directories (macOS and Windows paths)
+
+**Development Tools:**
+- `Library/Developer/Xcode/DerivedData/`, `Library/Developer/Xcode/Archives/`
+
+**Docker:**
+- `Library/Containers/com.docker.docker/`
+
+**Cloud Storage Caches:**
+- Dropbox, Google Drive, iCloud cache directories
+
+**Mail App Caches:**
+- `Library/Mail/V*/MailData/Envelope Index*`, `Library/Mail/V*/MailData/AvailableFeeds/`
+
+**General Cache Locations:**
+- `Library/Caches/` (macOS)
+- `AppData/Local/Temp/`, `AppData/Local/Cache/` (Windows)
 
 The `.oci` directory itself is always ignored regardless of patterns in `.ocignore`.
 
