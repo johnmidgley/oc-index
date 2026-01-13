@@ -22,7 +22,7 @@ VS Marketplace Link: https://marketplace.cursorapi.com/items/?itemName=vadimcn.v
 The `oci` tool is implemented as a Rust CLI application with the following module structure:
 
 - `main.rs` - CLI argument parsing using `clap` with derive macros
-- `index.rs` - Core index data structure and persistence (JSON-based storage)
+- `index.rs` - Core index data structure and persistence (SQLite-based storage)
 - `file_utils.rs` - File operations including SHA256 hashing, metadata retrieval
 - `ignore.rs` - Pattern matching for ignored files (similar to .gitignore)
 - `commands.rs` - Implementation of all subcommands
@@ -52,11 +52,15 @@ The `oci` tool is implemented as a Rust CLI application with the following modul
    
    Generic directory names like `build/`, `dist/`, `bin/`, and `out/` are intentionally NOT included in defaults as they could be legitimate organizational directories. Similarly, final artifacts (executables, libraries) and IDE project files are not included. Users can modify `.ocignore` directly or use `oci ignore [pattern]` to add custom patterns.
 
+6. **Duplicate File Counting**: The `duplicates` and `stats` commands use consistent methodology for counting duplicates. When files share the same hash (indicating identical content), all files in the duplicate group are counted as duplicates, not just the "extra" copies. For example, if 3 files have identical content, the duplicate count is 3 (not 2). This makes the output consistent between both commands and clearer for users understanding how many files are involved in duplication.
+
+7. **Duplicates Command Scope**: The `duplicates` command always searches the entire repository recursively. The `-r` flag was intentionally removed because checking for duplicates in only a single directory (non-recursive) has limited practical value - duplicate detection is most useful when comparing files across the entire repository structure.
+
 ### Testing
 
 The project includes:
 - 10 unit tests covering core functionality (index operations, hashing, pattern matching)
-- 10 integration tests that verify end-to-end command behavior
+- 30 integration tests that verify end-to-end command behavior
 
 All tests pass and cover the major use cases and edge cases.
 
