@@ -796,3 +796,85 @@ fn test_stats_no_duplicates() {
     assert!(!stdout.contains("Wasted space:")); // Should not show when there are no duplicates
     assert!(stdout.contains("Storage efficiency: 100.00%"));
 }
+
+#[test]
+fn test_status_dot_from_subdirectory_with_spaces() {
+    // Regression test for bug where "oci status ." from a subdirectory with spaces
+    // would show files as both added (+) and deleted (-)
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    // Create a subdirectory with spaces in the name
+    let subdir = test_dir.path().join("Google Drive").join("Papers");
+    fs::create_dir_all(&subdir).unwrap();
+    
+    // Create files in the subdirectory
+    fs::write(subdir.join("paper1.pdf"), "content1").unwrap();
+    fs::write(subdir.join("paper2.pdf"), "content2").unwrap();
+    
+    // Update the index
+    run_oci(&["update"], test_dir.path());
+    
+    // Run "status ." from the subdirectory
+    let (stdout, _, exit_code) = run_oci(&["status", "."], &subdir);
+    assert_eq!(exit_code, 0);
+    
+    // Should show "No changes"
+    assert!(stdout.contains("No changes"), "Expected 'No changes' but got:\n{}", stdout);
+    
+    // Should NOT show both + and - for the same file (the bug we're testing for)
+    assert!(!stdout.contains("+ "), "Unexpectedly found '+' (added) in output:\n{}", stdout);
+    assert!(!stdout.contains("- "), "Unexpectedly found '-' (deleted) in output:\n{}", stdout);
+    
+    // Modify one file and verify status detects it correctly
+    fs::write(subdir.join("paper1.pdf"), "modified content").unwrap();
+    let (stdout, _, exit_code) = run_oci(&["status", "."], &subdir);
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("U "), "Should show 'U' for modified file");
+    assert!(stdout.contains("paper1.pdf"));
+    // Should show exactly one line with U, not both + and -
+    let u_count = stdout.matches("U ").count();
+    let plus_count = stdout.matches("+ ").count();
+    let minus_count = stdout.matches("- ").count();
+    assert_eq!(u_count, 1, "Should have exactly 1 'U' line");
+    assert_eq!(plus_count, 0, "Should have 0 '+' lines");
+    assert_eq!(minus_count, 0, "Should have 0 '-' lines");
+}
+
+#[test]
+fn test_update_dot_from_subdirectory_with_spaces() {
+    // Regression test to ensure "oci update ." works correctly from subdirectories with spaces
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    // Create a subdirectory with spaces
+    let subdir = test_dir.path().join("My Documents").join("Projects");
+    fs::create_dir_all(&subdir).unwrap();
+    
+    // Create files in the subdirectory
+    fs::write(subdir.join("file1.txt"), "content1").unwrap();
+    fs::write(subdir.join("file2.txt"), "content2").unwrap();
+    
+    // Update the index from the subdirectory using "."
+    let (stdout, _, exit_code) = run_oci(&["update", "."], &subdir);
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Updated 2 file(s)"));
+    assert!(stdout.contains("2 added"));
+    
+    // Verify status shows no changes
+    let (stdout, _, exit_code) = run_oci(&["status", "."], &subdir);
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("No changes"));
+    
+    // Modify a file and update again
+    fs::write(subdir.join("file1.txt"), "modified").unwrap();
+    let (stdout, _, exit_code) = run_oci(&["update", "."], &subdir);
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Updated 1 file(s)"));
+    assert!(stdout.contains("1 updated"));
+    
+    // Verify status shows no changes after update
+    let (stdout, _, exit_code) = run_oci(&["status", "."], &subdir);
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("No changes"));
+}

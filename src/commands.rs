@@ -92,13 +92,17 @@ pub fn status(pattern: Option<String>, recursive: bool, verbose: bool) -> Result
             bail!("Path does not exist: {}", target_path.display());
         }
         
-        let rel_path = target_path.strip_prefix(&repo_root)
+        // Canonicalize to resolve ".", "..", and symlinks
+        let canonical_path = target_path.canonicalize()
+            .context("Failed to canonicalize path")?;
+        
+        let rel_path = canonical_path.strip_prefix(&repo_root.canonicalize()?)
             .context("Path is outside repository")?;
         let rel_path_str = rel_path.to_string_lossy().to_string();
         
         // If it's a file, always non-recursive; if directory, use recursive flag
-        let is_recursive = target_path.is_dir() && recursive;
-        (target_path, rel_path_str, is_recursive)
+        let is_recursive = canonical_path.is_dir() && recursive;
+        (canonical_path, rel_path_str, is_recursive)
     } else if recursive {
         // No path, but -r flag: scan from current directory recursively
         let rel_current = current_dir.strip_prefix(&repo_root)
@@ -232,6 +236,10 @@ pub fn update(pattern: Option<String>, verbose: bool) -> Result<()> {
     if !target_path.exists() {
         bail!("Path does not exist: {}", target_path.display());
     }
+    
+    // Canonicalize to resolve ".", "..", and symlinks
+    let target_path = target_path.canonicalize()
+        .context("Failed to canonicalize path")?;
     
     let mut added_count = 0;
     let mut updated_count = 0;

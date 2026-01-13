@@ -43,7 +43,12 @@ TODO - It looks like update and status could be abstracted better to both use a 
 
 3. **Change Detection**: Files are considered unchanged if both size and modified time match. This avoids unnecessary hashing for both status checks and updates. The `update` command only recomputes hashes for files that are new or have changed (different size or modified time), making it efficient for incremental updates. Files that haven't changed are skipped and counted separately in the output.
 
-4. **Path Handling**: All paths in the index are stored relative to the repository root for portability. Display paths are made relative to the current working directory for user convenience.
+4. **Path Handling**: All paths in the index are stored relative to the repository root for portability. Display paths are made relative to the current working directory for user convenience. When processing user-provided path arguments (especially "." and ".."), paths are canonicalized using `canonicalize()` to resolve:
+   - Relative path components like "." and ".."
+   - Symlinks (e.g., `/tmp` → `/private/tmp` on macOS)
+   - Ensuring consistent path comparison between filesystem scans and index lookups
+   
+   Without canonicalization, paths like "Google Drive/Papers/./file.txt" won't match "Google Drive/Papers/file.txt" in HashSet lookups, causing files to incorrectly appear as both added and deleted.
 
 5. **Ignore Patterns**: Uses the `glob` crate for pattern matching, supporting wildcards similar to `.gitignore`. During initialization (`oci init`), a `.ocignore` file is created with conservative default patterns for common intermediate/derived files. These defaults are written to the file (not hardcoded in the application), making them transparent and editable by users. The patterns favor specificity over breadth to avoid false positives:
    - Package manager dependencies and caches (e.g., `node_modules/`, `.npm/`)
