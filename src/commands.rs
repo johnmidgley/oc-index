@@ -78,7 +78,7 @@ pub fn ignore(pattern: Option<String>) -> Result<()> {
 }
 
 /// Check status of files
-pub fn status(pattern: Option<String>, recursive: bool) -> Result<()> {
+pub fn status(pattern: Option<String>, recursive: bool, verbose: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let current_dir = env::current_dir()?;
     let index = Index::load(&repo_root)?;
@@ -109,35 +109,47 @@ pub fn status(pattern: Option<String>, recursive: bool) -> Result<()> {
         (repo_root.clone(), String::new(), true)
     };
     
-    // Get all files from filesystem
+    // Get all files from filesystem (non-ignored)
     let mut fs_files = std::collections::HashSet::new();
+    
+    // If verbose, also collect ignored files
+    let mut ignored_files = std::collections::HashSet::new();
     
     if scan_dir.is_file() {
         // Single file
         let rel_path = scan_dir.strip_prefix(&repo_root)
             .context("Path is outside repository")?;
-        fs_files.insert(rel_path.to_string_lossy().to_string());
+        let rel_path_str = rel_path.to_string_lossy().to_string();
+        
+        if ignore::should_ignore(rel_path, &patterns) {
+            if verbose {
+                ignored_files.insert(rel_path_str);
+            }
+        } else {
+            fs_files.insert(rel_path_str);
+        }
     } else {
-        // Directory
+        // Directory - need to walk without filtering for verbose mode
         let walker = if is_recursive {
             WalkDir::new(&scan_dir).into_iter()
         } else {
             WalkDir::new(&scan_dir).max_depth(1).into_iter()
         };
         
-        for entry in walker.filter_entry(|e| {
-            // Convert to relative path for pattern matching
-            if let Ok(rel) = e.path().strip_prefix(&repo_root) {
-                !ignore::should_ignore(rel, &patterns)
-            } else {
-                true // Don't filter if path conversion fails
-            }
-        }) {
+        for entry in walker {
             let entry = entry?;
             if entry.file_type().is_file() {
                 let rel_path = entry.path().strip_prefix(&repo_root)
                     .context("Path is outside repository")?;
-                fs_files.insert(rel_path.to_string_lossy().to_string());
+                let rel_path_str = rel_path.to_string_lossy().to_string();
+                
+                if ignore::should_ignore(rel_path, &patterns) {
+                    if verbose {
+                        ignored_files.insert(rel_path_str);
+                    }
+                } else {
+                    fs_files.insert(rel_path_str);
+                }
             }
         }
     }
@@ -151,7 +163,7 @@ pub fn status(pattern: Option<String>, recursive: bool) -> Result<()> {
     
     let mut has_changes = false;
     
-    // Check for modified and added files
+    // Check for modified, added, and unchanged files
     for fs_path in &fs_files {
         let full_path = repo_root.join(fs_path);
         
@@ -162,6 +174,10 @@ pub fn status(pattern: Option<String>, recursive: bool) -> Result<()> {
                 let display_path = make_relative_to_current(&repo_root, &current_dir, fs_path)?;
                 println!("U {}", file_utils::format_entry(&create_entry_with_path(&full_path, display_path)?));
                 has_changes = true;
+            } else if verbose {
+                // Unchanged file - only show in verbose mode
+                let display_path = make_relative_to_current(&repo_root, &current_dir, fs_path)?;
+                println!("= {}", file_utils::format_entry(&create_entry_with_path(&full_path, display_path)?));
             }
         } else {
             // File not in index - added
@@ -182,7 +198,18 @@ pub fn status(pattern: Option<String>, recursive: bool) -> Result<()> {
         }
     }
     
-    if !has_changes {
+    // Show ignored files in verbose mode
+    if verbose {
+        for ignored_path in &ignored_files {
+            let full_path = repo_root.join(ignored_path);
+            let display_path = make_relative_to_current(&repo_root, &current_dir, ignored_path)?;
+            if full_path.exists() {
+                println!("I {}", file_utils::format_entry(&create_entry_with_path(&full_path, display_path)?));
+            }
+        }
+    }
+    
+    if !verbose && !has_changes {
         println!("No changes");
     }
     

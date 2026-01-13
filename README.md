@@ -163,12 +163,18 @@ The `.oci` directory itself is always ignored regardless of patterns in `.ocigno
 To check for differences between the index and the file system, use
 
 ```
-oci status [path] [-r]
+oci status [path] [-r] [-v]
 ```
 
 Where `path` is an optional file or directory to check. If omitted, the entire repository is checked.
 
-A file is considered not changed if its size and last modified time match the index. The path of any file that has changed is output with a '+' prefix to indicate that it exists in the filesystem but not the index, a '-' prefix to indicate it exists in the index but not the filesystem, and a 'U' prefix to indicate that the filesystem version has been modified from what the index contains. 
+A file is considered not changed if its size and last modified time match the index. The path of any file that has changed is output with a prefix indicating its status:
+
+- `+` - File exists in the filesystem but not in the index (new file)
+- `-` - File exists in the index but not in the filesystem (deleted file)
+- `U` - File has been modified from what the index contains (updated file)
+- `=` - File is unchanged (only shown with `-v` flag)
+- `I` - File is ignored by patterns in `.ocignore` (only shown with `-v` flag)
 
 Files are output in a human readable format with the following fields
 
@@ -180,10 +186,12 @@ For each file, ```path``` is displayed relative to where the command was called.
 
 ### Behavior
 
-- `oci status` - Checks the entire repository from the root recursively
+- `oci status` - Checks the entire repository from the root recursively, showing only changed files
 - `oci status <path>` - Checks only the specified file or directory (non-recursive for directories)
 - `oci status <path> -r` - Checks the specified directory and all subdirectories recursively
 - `oci status -r` - Checks from the current directory and its subdirectories recursively
+- `oci status -v` - Verbose mode: shows all files including unchanged and ignored files
+- `oci status <path> -r -v` - Checks the specified directory recursively and shows all files
 
 ## update
 

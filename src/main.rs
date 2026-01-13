@@ -33,6 +33,10 @@ enum Commands {
         /// Recurse into subdirectories
         #[arg(short)]
         r: bool,
+        
+        /// Verbose mode - show all files including unchanged and ignored
+        #[arg(short)]
+        v: bool,
     },
     
     /// Update the index with changes from the filesystem
@@ -96,7 +100,7 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Init => commands::init(),
         Commands::Ignore { pattern } => commands::ignore(pattern),
-        Commands::Status { path, r } => commands::status(path, r),
+        Commands::Status { path, r, v } => commands::status(path, r, v),
         Commands::Update { pattern } => commands::update(pattern),
         Commands::Ls { r } => commands::ls(r),
         Commands::Grep { hash } => commands::grep(&hash),
