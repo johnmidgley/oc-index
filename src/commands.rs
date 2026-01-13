@@ -217,7 +217,7 @@ pub fn status(pattern: Option<String>, recursive: bool, verbose: bool) -> Result
 }
 
 /// Update the index with changes from the filesystem
-pub fn update(pattern: Option<String>) -> Result<()> {
+pub fn update(pattern: Option<String>, verbose: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let current_dir = env::current_dir()?;
     let mut index = Index::load(&repo_root)?;
@@ -244,7 +244,13 @@ pub fn update(pattern: Option<String>) -> Result<()> {
             .context("Path is outside repository")?;
         let rel_path_str = rel_path.to_string_lossy().to_string();
         
-        if !ignore::should_ignore(rel_path, &patterns) {
+        if ignore::should_ignore(rel_path, &patterns) {
+            // File is ignored
+            if verbose {
+                let display_path = make_relative_to_current(&repo_root, &current_dir, &rel_path_str)?;
+                println!("I {}", display_path);
+            }
+        } else {
             let is_new = index.get(&rel_path_str)?.is_none();
             
             if should_update_file(&index, &target_path, &rel_path_str)? {
@@ -262,20 +268,29 @@ pub fn update(pattern: Option<String>) -> Result<()> {
                 }
             } else {
                 skipped_count += 1;
+                if verbose {
+                    let display_path = make_relative_to_current(&repo_root, &current_dir, &rel_path_str)?;
+                    println!("= {}", display_path);
+                }
             }
         }
     } else {
         // Update directory recursively
         // First, collect all files that exist on disk
         let mut fs_files = std::collections::HashSet::new();
+        let mut ignored_files: Vec<String> = Vec::new();
         
+        // Walk the directory tree
         for entry in WalkDir::new(&target_path).into_iter()
             .filter_entry(|e| {
-                // Convert to relative path for pattern matching
+                // In verbose mode, we want to see ignored files too,
+                // so we need to walk into directories even if they match ignore patterns
+                // But we still skip .oci directory
                 if let Ok(rel) = e.path().strip_prefix(&repo_root) {
-                    !ignore::should_ignore(rel, &patterns)
+                    let rel_str = rel.to_string_lossy();
+                    !rel_str.starts_with(".oci")
                 } else {
-                    true // Don't filter if path conversion fails
+                    true
                 }
             }) {
             let entry = entry?;
@@ -284,25 +299,37 @@ pub fn update(pattern: Option<String>) -> Result<()> {
                 let rel_path = entry.path().strip_prefix(&repo_root)
                     .context("Path is outside repository")?;
                 let rel_path_str = rel_path.to_string_lossy().to_string();
-                fs_files.insert(rel_path_str.clone());
                 
-                let is_new = index.get(&rel_path_str)?.is_none();
-                
-                if should_update_file(&index, entry.path(), &rel_path_str)? {
-                    let display_path = make_relative_to_current(&repo_root, &current_dir, &rel_path_str)?;
-                    let prefix = if is_new { "+" } else { "U" };
-                    println!("{} {}", prefix, display_path);
-                    
-                    let file_entry = file_utils::create_file_entry(entry.path(), rel_path_str)?;
-                    index.upsert(file_entry)?;
-                    
-                    if is_new {
-                        added_count += 1;
-                    } else {
-                        updated_count += 1;
+                if ignore::should_ignore(rel_path, &patterns) {
+                    // File is ignored - only collect if verbose
+                    if verbose {
+                        ignored_files.push(rel_path_str);
                     }
                 } else {
-                    skipped_count += 1;
+                    fs_files.insert(rel_path_str.clone());
+                    
+                    let is_new = index.get(&rel_path_str)?.is_none();
+                    
+                    if should_update_file(&index, entry.path(), &rel_path_str)? {
+                        let display_path = make_relative_to_current(&repo_root, &current_dir, &rel_path_str)?;
+                        let prefix = if is_new { "+" } else { "U" };
+                        println!("{} {}", prefix, display_path);
+                        
+                        let file_entry = file_utils::create_file_entry(entry.path(), rel_path_str)?;
+                        index.upsert(file_entry)?;
+                        
+                        if is_new {
+                            added_count += 1;
+                        } else {
+                            updated_count += 1;
+                        }
+                    } else {
+                        skipped_count += 1;
+                        if verbose {
+                            let display_path = make_relative_to_current(&repo_root, &current_dir, &rel_path_str)?;
+                            println!("= {}", display_path);
+                        }
+                    }
                 }
             }
         }
@@ -321,6 +348,14 @@ pub fn update(pattern: Option<String>) -> Result<()> {
                 println!("- {}", display_path);
                 index.remove(&indexed_entry.path)?;
                 removed_count += 1;
+            }
+        }
+        
+        // Display ignored files if verbose
+        if verbose {
+            for rel_path_str in ignored_files {
+                let display_path = make_relative_to_current(&repo_root, &current_dir, &rel_path_str)?;
+                println!("I {}", display_path);
             }
         }
     }

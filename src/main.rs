@@ -43,6 +43,10 @@ enum Commands {
     Update {
         /// Pattern to update (file, directory, or glob pattern)
         pattern: Option<String>,
+        
+        /// Verbose mode - show all files including unchanged
+        #[arg(short)]
+        v: bool,
     },
     
     /// List files in the index
@@ -101,7 +105,7 @@ fn main() -> Result<()> {
         Commands::Init => commands::init(),
         Commands::Ignore { pattern } => commands::ignore(pattern),
         Commands::Status { path, r, v } => commands::status(path, r, v),
-        Commands::Update { pattern } => commands::update(pattern),
+        Commands::Update { pattern, v } => commands::update(pattern, v),
         Commands::Ls { r } => commands::ls(r),
         Commands::Grep { hash } => commands::grep(&hash),
         Commands::Duplicates => commands::duplicates(),

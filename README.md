@@ -197,11 +197,17 @@ For each file, ```path``` is displayed relative to where the command was called.
 
 To update the index with any changes from the filesystem, which means updating any fields in the index that have changed (e.g. sha256) call
 
-```oci update [pattern]```
+```
+oci update [pattern] [-v]
+```
 
 If `pattern` is a file, that single file is updated in the index. If `pattern` is a directory, all files that have changed in that directory and any sub-directories (recursively) are updated in the index. If `pattern` is omitted, the repository root is assumed. 
 
 `update` is done efficiently, only computing hashes for files that have changed, skipping any files that have not changed (i.e. num_bytes and modified haven't changed).
+
+### Options
+
+- `-v` - Verbose mode: shows all files including unchanged and ignored files
 
 ### Output Format
 
@@ -210,6 +216,8 @@ Each file being processed is displayed with a prefix indicating the operation:
 - `+` - File is being **added** to the index (new file)
 - `U` - File is being **updated** (hash or metadata changed)
 - `-` - File is being **removed** from the index (deleted from filesystem)
+- `=` - File is unchanged (only shown with `-v` flag)
+- `I` - File is ignored by patterns in `.ocignore` (only shown with `-v` flag)
 
 Example output:
 ```
@@ -217,6 +225,23 @@ Example output:
 + file2.txt
 U existing_file.txt
 - deleted_file.txt
+Updated 4 file(s) in the index (2 added, 1 updated, 1 removed)
+Skipped 5 unchanged file(s)
+```
+
+With verbose mode (`-v`):
+```
++ file1.txt
++ file2.txt
+U existing_file.txt
+- deleted_file.txt
+= unchanged1.txt
+= unchanged2.txt
+= unchanged3.txt
+= unchanged4.txt
+= unchanged5.txt
+I node_modules/package.js
+I build/output.log
 Updated 4 file(s) in the index (2 added, 1 updated, 1 removed)
 Skipped 5 unchanged file(s)
 ```

@@ -29,6 +29,8 @@ The `oci` tool is implemented as a Rust CLI application with the following modul
 
 ### Design Decisions
 
+TODO - It looks like update and status could be abstracted better to both use a function that reqturns a sequence (is yield supported in rust) of status entries that indicate the state of each file compared to the index. 
+
 1. **Index Storage**: The index is stored as a SQLite database (`.oci/index.db`) for efficiency and scalability. SQLite provides:
    - Compact binary storage (much smaller than JSON)
    - Fast indexed queries by path (primary key) and hash (indexed column)
