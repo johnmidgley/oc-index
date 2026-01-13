@@ -75,21 +75,3 @@ cargo install --path .
 # Run without installing
 cargo run -- <command> [args]
 ```
-
-## Future Command Ideas
-
-These are potential commands that could enhance the tool's functionality based on its core purpose of tracking files by hash identity.
-
-### Implemented
-
-**1. `oci duplicates` (or `dupes`)** - Find duplicate files
-```bash
-oci duplicates
-```
-Shows all files with identical hashes (duplicate content), grouped together. Very useful for finding redundant files and saving space. This leverages the hash-based tracking to identify files with identical content regardless of name or location. Always searches the entire repository recursively.
-
-**2. `oci stats` - Show index statistics**
-```bash
-oci stats
-```
-Displays summary information: total files indexed, total size, number of unique hashes, number of duplicates, storage efficiency, etc. Provides quick insight into what's in the index.
