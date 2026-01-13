@@ -248,7 +248,7 @@ If you'd like to remove files based on another index, call
 oci prune <source>
 ```
 
-where `<source>` is a path to another `oci` index. If there are any pending updates (i.e. `status` shows changes), the prune exits with an error. 
+where `<source>` is a path to another `oci` index. If there are any pending updates in either the local or source index (i.e. `status` shows changes), the prune exits with an error. 
 
 If there are no pending changes, the prune command removes two types of files:
 
@@ -285,7 +285,7 @@ To permanently delete pruned files, call:
 oci prune --purge
 ```
 
-This command will ask for confirmation before deleting. To skip the confirmation prompt (useful for scripts), use the `-f` or `--force` flag:
+This command checks for pending changes in the local index before proceeding. If there are pending changes, it exits with an error. If there are no pending changes, it will ask for confirmation before deleting. To skip the confirmation prompt (useful for scripts), use the `-f` or `--force` flag:
 
 ```
 oci prune --purge -f

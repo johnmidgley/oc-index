@@ -309,6 +309,34 @@ fn test_prune_fails_with_pending_changes() {
 }
 
 #[test]
+fn test_prune_fails_with_source_pending_changes() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+
+    // Create and index a file in source
+    fs::write(source_dir.path().join("test.txt"), "content").unwrap();
+    run_oci(&["update"], source_dir.path());
+
+    // Create and index a file in local
+    fs::write(local_dir.path().join("local.txt"), "local content").unwrap();
+    run_oci(&["update"], local_dir.path());
+
+    // Modify the source file without updating the index
+    fs::write(source_dir.path().join("test.txt"), "modified").unwrap();
+
+    // Prune should fail due to pending changes in source
+    let source_path = source_dir.path().to_str().unwrap();
+    let (_, stderr, exit_code) = run_oci(&["prune", source_path], local_dir.path());
+    assert_ne!(exit_code, 0);
+    assert!(stderr.contains("pending changes"));
+    assert!(stderr.contains("source index"));
+}
+
+#[test]
 fn test_prune_purge_deletes_files() {
     let source_dir = TempDir::new().unwrap();
     let local_dir = TempDir::new().unwrap();
@@ -339,6 +367,41 @@ fn test_prune_purge_deletes_files() {
     
     // Verify pruneyard is gone
     assert!(!local_dir.path().join(".oci/pruneyard").exists());
+}
+
+#[test]
+fn test_prune_purge_fails_with_pending_changes() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Create files with same content
+    fs::write(source_dir.path().join("file.txt"), "content").unwrap();
+    fs::write(local_dir.path().join("file.txt"), "content").unwrap();
+    fs::write(local_dir.path().join("other.txt"), "other content").unwrap();
+    
+    // Update both indices
+    run_oci(&["update"], source_dir.path());
+    run_oci(&["update"], local_dir.path());
+    
+    // Prune local using source
+    let source_path = source_dir.path().to_str().unwrap();
+    run_oci(&["prune", source_path], local_dir.path());
+    
+    // Verify file is in pruneyard
+    assert!(local_dir.path().join(".oci/pruneyard/file.txt").exists());
+    
+    // Modify a file without updating the index
+    fs::write(local_dir.path().join("other.txt"), "modified").unwrap();
+    
+    // Purge should fail due to pending changes
+    let (_, stderr, exit_code) = run_oci(&["prune", "--purge", "--force"], local_dir.path());
+    assert_ne!(exit_code, 0);
+    assert!(stderr.contains("pending changes"));
+    assert!(stderr.contains("local index"));
 }
 
 #[test]

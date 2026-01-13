@@ -427,6 +427,11 @@ pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no
     }
     
     if purge {
+        // Check for pending changes in local index before purging
+        if has_pending_changes(&repo_root)? {
+            bail!("Cannot purge: there are pending changes in the local index. Run 'oci status' to see changes.");
+        }
+        
         // Permanently delete pruned files
         let pruneyard_path = repo_root.join(OCI_DIR).join("pruneyard");
         
@@ -465,9 +470,9 @@ pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no
     let source_path = source
         .ok_or_else(|| anyhow::anyhow!("Source path is required for prune operation"))?;
     
-    // Check for pending changes
+    // Check for pending changes in local index
     if has_pending_changes(&repo_root)? {
-        bail!("Cannot prune: there are pending changes. Run 'oci status' to see changes.");
+        bail!("Cannot prune: there are pending changes in the local index. Run 'oci status' to see changes.");
     }
     
     // Load local and source indices
@@ -491,6 +496,11 @@ pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no
     
     if canonical_source == canonical_local {
         bail!("Cannot prune using the same index as source and local");
+    }
+    
+    // Check for pending changes in source index
+    if has_pending_changes(&source_abs_path)? {
+        bail!("Cannot prune: there are pending changes in the source index at {}. Run 'oci status' in the source directory to see changes.", source_abs_path.display());
     }
     
     let source_index = Index::load(&source_abs_path)
