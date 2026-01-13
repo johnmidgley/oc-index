@@ -654,3 +654,90 @@ fn test_prune_removes_empty_directories() {
     assert!(!local_dir.path().join("empty1/empty2").exists());
     assert!(!local_dir.path().join("empty1").exists());
 }
+
+#[test]
+fn test_duplicates_finds_duplicate_files() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    // Create files with duplicate content
+    fs::write(test_dir.path().join("file1.txt"), "content").unwrap();
+    fs::write(test_dir.path().join("file2.txt"), "content").unwrap();
+    fs::write(test_dir.path().join("file3.txt"), "different").unwrap();
+    
+    run_oci(&["update"], test_dir.path());
+    
+    // Run duplicates command
+    let (stdout, _, exit_code) = run_oci(&["duplicates"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    
+    // Should find the duplicates
+    assert!(stdout.contains("Found 2 duplicate file(s) in 1 group(s)"));
+    assert!(stdout.contains("file1.txt"));
+    assert!(stdout.contains("file2.txt"));
+    assert!(!stdout.contains("file3.txt")); // This one is unique
+}
+
+#[test]
+fn test_duplicates_no_duplicates() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    // Create files with unique content
+    fs::write(test_dir.path().join("file1.txt"), "content1").unwrap();
+    fs::write(test_dir.path().join("file2.txt"), "content2").unwrap();
+    
+    run_oci(&["update"], test_dir.path());
+    
+    // Run duplicates command
+    let (stdout, _, exit_code) = run_oci(&["duplicates"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("No duplicate files found"));
+}
+
+#[test]
+fn test_duplicates_multiple_groups() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    // Create two groups of duplicates
+    fs::write(test_dir.path().join("file1.txt"), "content_a").unwrap();
+    fs::write(test_dir.path().join("file2.txt"), "content_a").unwrap();
+    fs::write(test_dir.path().join("file3.txt"), "content_b").unwrap();
+    fs::write(test_dir.path().join("file4.txt"), "content_b").unwrap();
+    fs::write(test_dir.path().join("file5.txt"), "unique").unwrap();
+    
+    run_oci(&["update"], test_dir.path());
+    
+    // Run duplicates command
+    let (stdout, _, exit_code) = run_oci(&["duplicates"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    
+    // Should find two groups with 4 total duplicates
+    assert!(stdout.contains("Found 4 duplicate file(s) in 2 group(s)"));
+    assert!(stdout.contains("file1.txt"));
+    assert!(stdout.contains("file2.txt"));
+    assert!(stdout.contains("file3.txt"));
+    assert!(stdout.contains("file4.txt"));
+    assert!(!stdout.contains("file5.txt")); // This one is unique
+}
+
+#[test]
+fn test_duplicates_recursive() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    // Create files in subdirectories with duplicate content
+    fs::create_dir_all(test_dir.path().join("subdir")).unwrap();
+    fs::write(test_dir.path().join("file1.txt"), "content").unwrap();
+    fs::write(test_dir.path().join("subdir/file2.txt"), "content").unwrap();
+    
+    run_oci(&["update"], test_dir.path());
+    
+    // Run duplicates from root (should find all duplicates across subdirectories)
+    let (stdout, _, exit_code) = run_oci(&["duplicates", "-r"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Found 2 duplicate file(s) in 1 group(s)"));
+    assert!(stdout.contains("file1.txt"));
+    assert!(stdout.contains("file2.txt"));
+}

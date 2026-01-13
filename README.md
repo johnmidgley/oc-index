@@ -25,6 +25,9 @@ oci status
 # Find files by hash
 oci grep <hash>
 
+# Find duplicate files
+oci duplicates
+
 # Ignore patterns
 oci ignore "*.log"
 
@@ -239,6 +242,45 @@ oci grep <hash>
 ```
 
 Where `<hash>` is the SHA256 hash of the file content you're looking for. This will list all files in the index with that hash. 
+
+## duplicates
+
+To find duplicate files (files with identical content), call:
+
+```
+oci duplicates [-r]
+```
+
+This command identifies all files in the current directory (or recursively with `-r`) that have identical content based on their SHA256 hash. Files are grouped by hash and displayed together.
+
+### Output Format
+
+The command displays:
+- Total number of duplicate files and duplicate groups
+- Potential space savings (bytes that could be freed by removing all but one copy of each duplicate)
+- Each group of duplicates, showing all files with identical content
+
+Example output:
+```
+Found 4 duplicate file(s) in 2 group(s)
+Potential space savings: 2048 bytes (0.00 MB)
+
+Hash: abc123...
+  1024 1609459200000 abc123... file1.txt
+  1024 1609459200000 abc123... backup/file1_copy.txt
+
+Hash: def456...
+  512 1609459200000 def456... data.txt
+  512 1609459200000 def456... old/data.txt
+
+```
+
+### Behavior
+
+- `oci duplicates` - Finds duplicates in the current directory (non-recursive)
+- `oci duplicates -r` - Finds duplicates in the current directory and all subdirectories recursively
+
+Note: Files are only considered duplicates if they have identical content (same SHA256 hash). Files with the same name but different content are not considered duplicates.
 
 ## prune 
 

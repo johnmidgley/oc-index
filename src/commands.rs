@@ -369,6 +369,84 @@ pub fn grep(hash: &str) -> Result<()> {
     Ok(())
 }
 
+/// Find duplicate files (files with identical content)
+pub fn duplicates(recursive: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let current_dir = env::current_dir()?;
+    let index = Index::load(&repo_root)?;
+    
+    let rel_current = current_dir.strip_prefix(&repo_root)
+        .context("Current directory is outside repository")?;
+    let rel_current_str = rel_current.to_string_lossy().to_string();
+    
+    // Get files from current directory (optionally recursive)
+    let entries: Vec<_> = if recursive {
+        index.get_dir_files_recursive(&rel_current_str)?
+    } else {
+        index.get_dir_files(&rel_current_str)?
+    };
+    
+    // Group files by hash
+    let mut hash_groups: std::collections::HashMap<String, Vec<crate::index::FileEntry>> = 
+        std::collections::HashMap::new();
+    
+    for entry in entries {
+        hash_groups.entry(entry.sha256.clone())
+            .or_insert_with(Vec::new)
+            .push(entry);
+    }
+    
+    // Filter to only hashes with duplicates (more than 1 file)
+    let mut duplicate_groups: Vec<_> = hash_groups.into_iter()
+        .filter(|(_, files)| files.len() > 1)
+        .collect();
+    
+    if duplicate_groups.is_empty() {
+        println!("No duplicate files found");
+        return Ok(());
+    }
+    
+    // Sort groups by hash for consistent output
+    duplicate_groups.sort_by(|a, b| a.0.cmp(&b.0));
+    
+    // Calculate statistics
+    let total_duplicate_files: usize = duplicate_groups.iter()
+        .map(|(_, files)| files.len())
+        .sum();
+    let total_groups = duplicate_groups.len();
+    
+    // Calculate wasted space (all but one copy of each duplicate set)
+    let wasted_bytes: u64 = duplicate_groups.iter()
+        .map(|(_, files)| {
+            let file_size = files[0].num_bytes;
+            file_size * (files.len() as u64 - 1)
+        })
+        .sum();
+    
+    println!("Found {} duplicate file(s) in {} group(s)", total_duplicate_files, total_groups);
+    println!("Potential space savings: {} bytes ({:.2} MB)\n", 
+             wasted_bytes, 
+             wasted_bytes as f64 / 1_048_576.0);
+    
+    // Display each group
+    for (hash, mut files) in duplicate_groups {
+        println!("Hash: {}", hash);
+        
+        // Sort files by path within each group for consistent output
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        
+        for entry in files {
+            let display_path = make_relative_to_current(&repo_root, &current_dir, &entry.path)?;
+            let mut display_entry = entry.clone();
+            display_entry.path = display_path;
+            println!("  {}", file_utils::format_entry(&display_entry));
+        }
+        println!();
+    }
+    
+    Ok(())
+}
+
 /// Prune files that exist in another index
 pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no_ignore: bool) -> Result<()> {
     let repo_root = find_repo_root()?;

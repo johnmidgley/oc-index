@@ -54,6 +54,13 @@ enum Commands {
         hash: String,
     },
     
+    /// Find duplicate files (files with identical content)
+    Duplicates {
+        /// Recurse into subdirectories
+        #[arg(short)]
+        r: bool,
+    },
+    
     /// Remove files that exist in another index
     Prune {
         /// Path to another oci index (source)
@@ -94,6 +101,7 @@ fn main() -> Result<()> {
         Commands::Update { pattern } => commands::update(pattern),
         Commands::Ls { r } => commands::ls(r),
         Commands::Grep { hash } => commands::grep(&hash),
+        Commands::Duplicates { r } => commands::duplicates(r),
         Commands::Prune { source, purge, restore, force, no_ignore } => commands::prune(source, purge, restore, force, no_ignore),
         Commands::Deinit { f } => commands::deinit(f),
     }
