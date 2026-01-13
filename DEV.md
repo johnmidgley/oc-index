@@ -80,76 +80,16 @@ cargo run -- <command> [args]
 
 These are potential commands that could enhance the tool's functionality based on its core purpose of tracking files by hash identity.
 
-### High Priority
+### Implemented
 
 **1. `oci duplicates` (or `dupes`)** - Find duplicate files
 ```bash
-oci duplicates [-r]
+oci duplicates
 ```
-Would show all files with identical hashes (duplicate content), grouped together. Very useful for finding redundant files and saving space. This leverages the hash-based tracking to identify files with identical content regardless of name or location.
+Shows all files with identical hashes (duplicate content), grouped together. Very useful for finding redundant files and saving space. This leverages the hash-based tracking to identify files with identical content regardless of name or location. Always searches the entire repository recursively.
 
-**2. `oci verify` - Verify file integrity**
-```bash
-oci verify [-r]
-```
-Recompute hashes for indexed files and report any that don't match their stored hash. Useful for detecting corrupted or tampered files. This is a core use case for hash-based file tracking.
-
-**3. `oci stats` - Show index statistics**
+**2. `oci stats` - Show index statistics**
 ```bash
 oci stats
 ```
-Display summary information: total files indexed, total size, number of unique hashes, number of duplicates, storage efficiency, etc. Provides quick insight into what's in the index.
-
-**4. `oci prune` - Clean up deleted files**
-```bash
-oci prune [-n/--dry-run]
-```
-Remove index entries for files that no longer exist on disk. Similar to `update` but only removes deleted entries without updating existing ones. The dry-run flag would show what would be removed.
-
-**5. `oci export` - Export index data**
-```bash
-oci export [--format csv|json] [-o output.csv]
-```
-Export the index to CSV or other formats for external analysis, reporting, or integration with other tools.
-
-### Medium Priority
-
-**6. `oci compare` - Compare directories or indexes**
-```bash
-oci compare <path1> <path2>
-oci compare --other-index <path-to-other-oci>
-```
-Compare two directories or indexes by hash to find files that exist in both, only in one, or have different content. Useful for directory synchronization analysis.
-
-**7. `oci tree` - Tree view of indexed files**
-```bash
-oci tree [-r]
-```
-Show indexed files in a hierarchical tree structure, similar to the Unix `tree` command but filtered to only show indexed files.
-
-**8. `oci find` - Search by filename pattern**
-```bash
-oci find <pattern>
-```
-Search indexed files by name pattern (complement to `grep` which searches by hash). Would support glob patterns like `*.txt` or `test*`.
-
-**9. `oci diff` - Show what changed**
-```bash
-oci diff <file>
-```
-For a modified file, show a detailed comparison between the indexed version and current version (could integrate with standard diff tools).
-
-**10. `oci history` - Track index changes over time**
-```bash
-oci history [<file>]
-```
-If we add an update history feature, this could show how files have changed over time (would require storing historical index snapshots).
-
-### Implementation Notes
-
-- **duplicates** and **verify** provide immediate practical value aligned with the tool's core purpose
-- **stats** would be quick to implement and provides useful overview information
-- **prune** complements the existing `update` command for index maintenance
-- **export** enables integration with other tools and workflows
-- Commands like **compare** and **tree** build on the existing data structures
-- **history** would require architectural changes to store multiple index versions
+Displays summary information: total files indexed, total size, number of unique hashes, number of duplicates, storage efficiency, etc. Provides quick insight into what's in the index.

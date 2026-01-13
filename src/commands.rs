@@ -370,21 +370,13 @@ pub fn grep(hash: &str) -> Result<()> {
 }
 
 /// Find duplicate files (files with identical content)
-pub fn duplicates(recursive: bool) -> Result<()> {
+pub fn duplicates() -> Result<()> {
     let repo_root = find_repo_root()?;
     let current_dir = env::current_dir()?;
     let index = Index::load(&repo_root)?;
     
-    let rel_current = current_dir.strip_prefix(&repo_root)
-        .context("Current directory is outside repository")?;
-    let rel_current_str = rel_current.to_string_lossy().to_string();
-    
-    // Get files from current directory (optionally recursive)
-    let entries: Vec<_> = if recursive {
-        index.get_dir_files_recursive(&rel_current_str)?
-    } else {
-        index.get_dir_files(&rel_current_str)?
-    };
+    // Get all files from the repository recursively
+    let entries: Vec<_> = index.get_dir_files_recursive("")?;
     
     // Group files by hash
     let mut hash_groups: std::collections::HashMap<String, Vec<crate::index::FileEntry>> = 
@@ -392,7 +384,7 @@ pub fn duplicates(recursive: bool) -> Result<()> {
     
     for entry in entries {
         hash_groups.entry(entry.sha256.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(entry);
     }
     
@@ -751,6 +743,80 @@ pub fn deinit(force: bool) -> Result<()> {
         .context("Failed to remove .oci directory")?;
     
     println!("Deinitialized oci index at {}", oci_dir.display());
+    Ok(())
+}
+
+/// Show index statistics
+pub fn stats() -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let index = Index::load(&repo_root)?;
+    
+    // Get all files from the index
+    let all_files = index.get_dir_files_recursive("")?;
+    
+    if all_files.is_empty() {
+        println!("Index is empty");
+        return Ok(());
+    }
+    
+    // Calculate statistics
+    let total_files = all_files.len();
+    let total_size: u64 = all_files.iter().map(|f| f.num_bytes).sum();
+    
+    // Group files by hash to find unique hashes and duplicates
+    let mut hash_map: std::collections::HashMap<String, Vec<&crate::index::FileEntry>> = 
+        std::collections::HashMap::new();
+    
+    for entry in &all_files {
+        hash_map.entry(entry.sha256.clone())
+            .or_default()
+            .push(entry);
+    }
+    
+    let unique_hashes = hash_map.len();
+    
+    // Calculate duplicate files (count all files in groups with >1 file)
+    let duplicate_files: usize = hash_map.values()
+        .filter(|files| files.len() > 1)
+        .map(|files| files.len())
+        .sum();
+    
+    // Calculate unique size (sum of sizes for one file per hash)
+    let unique_size: u64 = hash_map.values()
+        .map(|files| files[0].num_bytes)
+        .sum();
+    
+    // Calculate wasted space (duplicates)
+    let wasted_space: u64 = hash_map.values()
+        .filter(|files| files.len() > 1)
+        .map(|files| {
+            let file_size = files[0].num_bytes;
+            file_size * (files.len() as u64 - 1)
+        })
+        .sum();
+    
+    // Calculate storage efficiency (how much space is actual unique content)
+    let storage_efficiency = if total_size > 0 {
+        (unique_size as f64 / total_size as f64) * 100.0
+    } else {
+        100.0
+    };
+    
+    // Display statistics
+    println!("Index Statistics:");
+    println!("  Total files: {}", total_files);
+    println!("  Total size: {} bytes ({:.2} MB)", total_size, total_size as f64 / 1_048_576.0);
+    println!("  Unique hashes: {}", unique_hashes);
+    println!("  Duplicate files: {}", duplicate_files);
+    
+    if duplicate_files > 0 {
+        let duplicate_groups = hash_map.values().filter(|files| files.len() > 1).count();
+        println!("  Duplicate groups: {}", duplicate_groups);
+        println!("  Wasted space: {} bytes ({:.2} MB)", wasted_space, wasted_space as f64 / 1_048_576.0);
+    }
+    
+    println!("  Storage efficiency: {:.2}%", storage_efficiency);
+    
     Ok(())
 }
 

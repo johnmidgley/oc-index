@@ -28,6 +28,9 @@ oci grep <hash>
 # Find duplicate files
 oci duplicates
 
+# Show index statistics
+oci stats
+
 # Ignore patterns
 oci ignore "*.log"
 
@@ -248,10 +251,10 @@ Where `<hash>` is the SHA256 hash of the file content you're looking for. This w
 To find duplicate files (files with identical content), call:
 
 ```
-oci duplicates [-r]
+oci duplicates
 ```
 
-This command identifies all files in the current directory (or recursively with `-r`) that have identical content based on their SHA256 hash. Files are grouped by hash and displayed together.
+This command identifies all files in the repository that have identical content based on their SHA256 hash. Files are grouped by hash and displayed together.
 
 ### Output Format
 
@@ -275,12 +278,39 @@ Hash: def456...
 
 ```
 
-### Behavior
-
-- `oci duplicates` - Finds duplicates in the current directory (non-recursive)
-- `oci duplicates -r` - Finds duplicates in the current directory and all subdirectories recursively
-
 Note: Files are only considered duplicates if they have identical content (same SHA256 hash). Files with the same name but different content are not considered duplicates.
+
+## stats
+
+To display statistics about the index, call:
+
+```
+oci stats
+```
+
+This command provides a summary of the indexed files, including:
+
+- **Total files**: The number of files tracked in the index
+- **Total size**: The combined size of all indexed files in bytes and MB
+- **Unique hashes**: The number of unique content hashes (unique files by content)
+- **Duplicate files**: The number of files that are duplicates of other files (total files - unique hashes)
+- **Duplicate groups**: The number of groups of duplicate files (only shown if duplicates exist)
+- **Wasted space**: The amount of storage consumed by duplicate files (only shown if duplicates exist)
+- **Storage efficiency**: The percentage of storage used by unique content (100% means no duplicates)
+
+Example output:
+```
+Index Statistics:
+  Total files: 100
+  Total size: 5242880 bytes (5.00 MB)
+  Unique hashes: 85
+  Duplicate files: 15
+  Duplicate groups: 5
+  Wasted space: 524288 bytes (0.50 MB)
+  Storage efficiency: 90.00%
+```
+
+This command is useful for getting a quick overview of your indexed content and identifying potential space savings from duplicate files.
 
 ## prune 
 

@@ -734,10 +734,65 @@ fn test_duplicates_recursive() {
     
     run_oci(&["update"], test_dir.path());
     
-    // Run duplicates from root (should find all duplicates across subdirectories)
-    let (stdout, _, exit_code) = run_oci(&["duplicates", "-r"], test_dir.path());
+    // Run duplicates (always recursive - should find all duplicates across subdirectories)
+    let (stdout, _, exit_code) = run_oci(&["duplicates"], test_dir.path());
     assert_eq!(exit_code, 0);
     assert!(stdout.contains("Found 2 duplicate file(s) in 1 group(s)"));
     assert!(stdout.contains("file1.txt"));
     assert!(stdout.contains("file2.txt"));
+}
+
+#[test]
+fn test_stats_empty_index() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    let (stdout, _, exit_code) = run_oci(&["stats"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Index is empty"));
+}
+
+#[test]
+fn test_stats_with_files() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    // Create some test files
+    fs::write(test_dir.path().join("file1.txt"), "hello world").unwrap();
+    fs::write(test_dir.path().join("file2.txt"), "hello world").unwrap(); // duplicate
+    fs::write(test_dir.path().join("file3.txt"), "different content").unwrap();
+    
+    run_oci(&["update"], test_dir.path());
+    
+    let (stdout, _, exit_code) = run_oci(&["stats"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Index Statistics:"));
+    assert!(stdout.contains("Total files: 3"));
+    assert!(stdout.contains("Unique hashes: 2"));
+    assert!(stdout.contains("Duplicate files: 2")); // 2 files with same content
+    assert!(stdout.contains("Duplicate groups: 1"));
+    assert!(stdout.contains("Wasted space:"));
+    assert!(stdout.contains("Storage efficiency:"));
+}
+
+#[test]
+fn test_stats_no_duplicates() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    // Create unique files
+    fs::write(test_dir.path().join("file1.txt"), "content1").unwrap();
+    fs::write(test_dir.path().join("file2.txt"), "content2").unwrap();
+    fs::write(test_dir.path().join("file3.txt"), "content3").unwrap();
+    
+    run_oci(&["update"], test_dir.path());
+    
+    let (stdout, _, exit_code) = run_oci(&["stats"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Total files: 3"));
+    assert!(stdout.contains("Unique hashes: 3"));
+    assert!(stdout.contains("Duplicate files: 0"));
+    assert!(!stdout.contains("Duplicate groups:")); // Should not show when there are no duplicates
+    assert!(!stdout.contains("Wasted space:")); // Should not show when there are no duplicates
+    assert!(stdout.contains("Storage efficiency: 100.00%"));
 }
