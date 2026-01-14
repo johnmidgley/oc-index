@@ -7,6 +7,7 @@ use walkdir::WalkDir;
 use crate::file_utils;
 use crate::ignore;
 use crate::index::{Index, OCI_DIR};
+use crate::config::Config;
 
 /// Find the repository root by looking for .oci directory
 fn find_repo_root() -> Result<PathBuf> {
@@ -23,6 +24,15 @@ fn find_repo_root() -> Result<PathBuf> {
             bail!("Not in an oci repository (or any parent directory)");
         }
     }
+}
+
+/// Check the version of the index and warn if it doesn't match the tool version
+fn check_version(repo_root: &Path) -> Result<()> {
+    let config = Config::load(repo_root)?;
+    if !config.check_version() {
+        config.warn_version_mismatch();
+    }
+    Ok(())
 }
 
 /// Initialize a new index
@@ -42,6 +52,10 @@ pub fn init() -> Result<()> {
     let index = Index::new()?;
     index.save(&current_dir)?;
     
+    // Initialize config with current version
+    let config = Config::new();
+    config.save(&current_dir)?;
+    
     // Initialize ocignore with default patterns
     ignore::init_ignore_file(&current_dir)?;
     
@@ -52,6 +66,7 @@ pub fn init() -> Result<()> {
 /// Add a pattern to the ignore list
 pub fn ignore(pattern: Option<String>) -> Result<()> {
     let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
     let current_dir = env::current_dir()?;
     
     let pattern_to_add = if let Some(p) = pattern {
@@ -80,6 +95,7 @@ pub fn ignore(pattern: Option<String>) -> Result<()> {
 /// Check status of files
 pub fn status(pattern: Option<String>, recursive: bool, verbose: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
     let current_dir = env::current_dir()?;
     let index = Index::load(&repo_root)?;
     let patterns = ignore::load_patterns(&repo_root)?;
@@ -232,6 +248,7 @@ pub fn status(pattern: Option<String>, recursive: bool, verbose: bool) -> Result
 /// Update the index with changes from the filesystem
 pub fn update(pattern: Option<String>, verbose: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
     let current_dir = env::current_dir()?;
     let mut index = Index::load(&repo_root)?;
     let patterns = ignore::load_patterns(&repo_root)?;
@@ -406,6 +423,7 @@ pub fn update(pattern: Option<String>, verbose: bool) -> Result<()> {
 /// List files in the index
 pub fn ls(recursive: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
     let current_dir = env::current_dir()?;
     let index = Index::load(&repo_root)?;
     
@@ -440,6 +458,7 @@ pub fn ls(recursive: bool) -> Result<()> {
 /// Find files by hash
 pub fn grep(hash: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
     let index = Index::load(&repo_root)?;
     
     let matches = index.find_by_hash(hash)?;
@@ -460,6 +479,7 @@ pub fn grep(hash: &str) -> Result<()> {
 /// Find duplicate files (files with identical content)
 pub fn duplicates() -> Result<()> {
     let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
     let current_dir = env::current_dir()?;
     let index = Index::load(&repo_root)?;
     
@@ -530,6 +550,7 @@ pub fn duplicates() -> Result<()> {
 /// Prune files that exist in another index
 pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no_ignore: bool, ignored: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
     
     if restore {
         // Restore pruned files
@@ -845,6 +866,7 @@ pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no
 /// Remove the index (deinitialize)
 pub fn deinit(force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
     let oci_dir = repo_root.join(OCI_DIR);
     
     // Ask for confirmation unless --force is used
@@ -874,6 +896,7 @@ pub fn deinit(force: bool) -> Result<()> {
 /// Show index statistics
 pub fn stats() -> Result<()> {
     let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
     let index = Index::load(&repo_root)?;
     
     // Get all files from the index

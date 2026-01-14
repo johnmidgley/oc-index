@@ -51,7 +51,26 @@ To initialize `oci`, switch to the directory you want to index (the repository r
 oci init
 ```
 
-This will first check that there is not an existing index (located in the .oci directory). If the directory already exists, the user is warned with an error and the tool exits. If the directory does not exist, then an empty index is created along with an `ocignore` file containing default ignore patterns (see the [ignore](#ignore) section below). 
+This will first check that there is not an existing index (located in the .oci directory). If the directory already exists, the user is warned with an error and the tool exits. If the directory does not exist, then an empty index is created along with:
+- A `config` file containing the tool version
+- An `ocignore` file with default ignore patterns (see the [ignore](#ignore) section below)
+
+The `config` file stores the version of the tool that created the index. This version is checked whenever you run any oci command, and a warning is displayed if there's a version mismatch between the index and the current tool version. 
+
+### Version Tracking
+
+The `.oci/config` file stores the version of the tool that created the index. When you run any oci command, the tool checks if the stored version matches the current tool version. If there's a mismatch, you'll see a warning like:
+
+```
+Warning: Index version mismatch!
+  Index was created with: v0.0.9
+  Current tool version:   v0.1.0
+  This may cause compatibility issues. Consider running 'oci update' to refresh the index.
+```
+
+This warning indicates that the index was created with a different version of oci. While the tool will continue to work, running `oci update` is recommended to ensure the index is up-to-date with the current tool version.
+
+### Index Structure
 
 The index has the following information for each file it tracks:
 

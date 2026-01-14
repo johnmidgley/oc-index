@@ -2,6 +2,7 @@ mod index;
 mod commands;
 mod file_utils;
 mod ignore;
+mod config;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
