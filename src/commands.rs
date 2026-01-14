@@ -138,16 +138,18 @@ fn determine_scan_target(
     }
 }
 
-/// Scan the filesystem and collect file information
-fn scan_filesystem_for_status(
+/// Scan the filesystem and display status as we go (streaming output)
+fn scan_and_display_status(
     scan_dir: &Path,
     is_recursive: bool,
     repo_root: &Path,
     patterns: &[String],
+    index: &Index,
+    display_ctx: &DisplayContext,
     verbose: bool,
-) -> Result<(std::collections::HashSet<String>, std::collections::HashSet<String>)> {
+) -> Result<(std::collections::HashSet<String>, bool)> {
     let mut fs_files = std::collections::HashSet::new();
-    let mut ignored_files = std::collections::HashSet::new();
+    let mut has_changes = false;
 
     if scan_dir.is_file() {
         // Single file
@@ -158,13 +160,34 @@ fn scan_filesystem_for_status(
 
         if ignore::should_ignore(rel_path, patterns) {
             if verbose {
-                ignored_files.insert(rel_path_str);
+                let display_path = display_ctx.make_relative(&rel_path_str)?;
+                let display_entry = display_ctx.create_status_entry(scan_dir, display_path)?;
+                StatusMarker::Ignored.display(&file_utils::format_entry(&display_entry));
             }
         } else {
-            fs_files.insert(rel_path_str);
+            fs_files.insert(rel_path_str.clone());
+            
+            // Check status and display immediately
+            if let Some(entry) = index.get(&rel_path_str)? {
+                if file_utils::has_changed(&entry, scan_dir)? {
+                    let display_path = display_ctx.make_relative(&rel_path_str)?;
+                    let display_entry = display_ctx.create_status_entry(scan_dir, display_path)?;
+                    StatusMarker::Updated.display(&file_utils::format_entry(&display_entry));
+                    has_changes = true;
+                } else if verbose {
+                    let display_path = display_ctx.make_relative(&rel_path_str)?;
+                    let display_entry = display_ctx.create_status_entry(scan_dir, display_path)?;
+                    StatusMarker::Unchanged.display(&file_utils::format_entry(&display_entry));
+                }
+            } else {
+                let display_path = display_ctx.make_relative(&rel_path_str)?;
+                let display_entry = display_ctx.create_status_entry(scan_dir, display_path)?;
+                StatusMarker::Added.display(&file_utils::format_entry(&display_entry));
+                has_changes = true;
+            }
         }
     } else {
-        // Directory - need to walk without filtering for verbose mode
+        // Directory - walk and display as we go
         let walker = if is_recursive {
             WalkDir::new(scan_dir).into_iter()
         } else {
@@ -182,6 +205,7 @@ fn scan_filesystem_for_status(
                     continue;
                 }
             };
+            
             if entry.file_type().is_file() {
                 let rel_path = entry
                     .path()
@@ -191,78 +215,56 @@ fn scan_filesystem_for_status(
 
                 if ignore::should_ignore(rel_path, patterns) {
                     if verbose {
-                        ignored_files.insert(rel_path_str);
+                        let display_path = display_ctx.make_relative(&rel_path_str)?;
+                        let display_entry = display_ctx.create_status_entry(entry.path(), display_path)?;
+                        StatusMarker::Ignored.display(&file_utils::format_entry(&display_entry));
                     }
                 } else {
-                    fs_files.insert(rel_path_str);
+                    fs_files.insert(rel_path_str.clone());
+                    
+                    // Check status and display immediately
+                    if let Some(idx_entry) = index.get(&rel_path_str)? {
+                        if file_utils::has_changed(&idx_entry, entry.path())? {
+                            let display_path = display_ctx.make_relative(&rel_path_str)?;
+                            let display_entry = display_ctx.create_status_entry(entry.path(), display_path)?;
+                            StatusMarker::Updated.display(&file_utils::format_entry(&display_entry));
+                            has_changes = true;
+                        } else if verbose {
+                            let display_path = display_ctx.make_relative(&rel_path_str)?;
+                            let display_entry = display_ctx.create_status_entry(entry.path(), display_path)?;
+                            StatusMarker::Unchanged.display(&file_utils::format_entry(&display_entry));
+                        }
+                    } else {
+                        let display_path = display_ctx.make_relative(&rel_path_str)?;
+                        let display_entry = display_ctx.create_status_entry(entry.path(), display_path)?;
+                        StatusMarker::Added.display(&file_utils::format_entry(&display_entry));
+                        has_changes = true;
+                    }
                 }
             }
         }
     }
 
-    Ok((fs_files, ignored_files))
+    Ok((fs_files, has_changes))
 }
 
-/// Display status changes between filesystem and index
-fn display_status_changes(
+/// Display deleted files (files in index but not on filesystem)
+fn display_deleted_files(
     fs_files: &std::collections::HashSet<String>,
     indexed_files: Vec<crate::index::FileEntry>,
-    ignored_files: &std::collections::HashSet<String>,
-    repo_root: &Path,
     display_ctx: &DisplayContext,
-    index: &Index,
-    verbose: bool,
 ) -> Result<bool> {
-    let mut has_changes = false;
+    let mut has_deletes = false;
 
-    // Check for modified, added, and unchanged files
-    for fs_path in fs_files {
-        let full_path = repo_root.join(fs_path);
-
-        if let Some(entry) = index.get(fs_path)? {
-            // File exists in index - check if modified
-            if file_utils::has_changed(&entry, &full_path)? {
-                let display_path = display_ctx.make_relative(fs_path)?;
-                let display_entry = display_ctx.create_display_entry(&full_path, display_path)?;
-                StatusMarker::Updated.display(&file_utils::format_entry(&display_entry));
-                has_changes = true;
-            } else if verbose {
-                // Unchanged file - only show in verbose mode
-                let display_path = display_ctx.make_relative(fs_path)?;
-                let display_entry = display_ctx.create_display_entry(&full_path, display_path)?;
-                StatusMarker::Unchanged.display(&file_utils::format_entry(&display_entry));
-            }
-        } else {
-            // File not in index - added
-            let display_path = display_ctx.make_relative(fs_path)?;
-            let display_entry = display_ctx.create_display_entry(&full_path, display_path)?;
-            StatusMarker::Added.display(&file_utils::format_entry(&display_entry));
-            has_changes = true;
-        }
-    }
-
-    // Check for deleted files
     for entry in indexed_files {
         if !fs_files.contains(&entry.path) {
             let formatted = display_ctx.format_entry_relative(&entry)?;
             StatusMarker::Deleted.display(&formatted);
-            has_changes = true;
+            has_deletes = true;
         }
     }
 
-    // Show ignored files in verbose mode
-    if verbose {
-        for ignored_path in ignored_files {
-            let full_path = repo_root.join(ignored_path);
-            if full_path.exists() {
-                let display_path = display_ctx.make_relative(ignored_path)?;
-                let display_entry = display_ctx.create_display_entry(&full_path, display_path)?;
-                StatusMarker::Ignored.display(&file_utils::format_entry(&display_entry));
-            }
-        }
-    }
-
-    Ok(has_changes)
+    Ok(has_deletes)
 }
 
 /// Check status of files
@@ -277,30 +279,30 @@ pub fn status(pattern: Option<String>, recursive: bool, verbose: bool) -> Result
     let (scan_dir, scan_rel_path, is_recursive) =
         determine_scan_target(pattern, recursive, &repo_root, &current_dir)?;
 
-    // Scan filesystem
-    let (fs_files, ignored_files) =
-        scan_filesystem_for_status(&scan_dir, is_recursive, &repo_root, &patterns, verbose)?;
+    let display_ctx = DisplayContext::new(repo_root.clone(), current_dir);
 
-    // Get indexed files for comparison
+    // Scan filesystem and display status as we go (streaming output)
+    let (fs_files, has_changes) = scan_and_display_status(
+        &scan_dir,
+        is_recursive,
+        &repo_root,
+        &patterns,
+        &index,
+        &display_ctx,
+        verbose,
+    )?;
+
+    // Get indexed files for comparison (to find deleted files)
     let indexed_files: Vec<_> = if is_recursive {
         index.get_dir_files_recursive(&scan_rel_path)?
     } else {
         index.get_dir_files(&scan_rel_path)?
     };
 
-    // Display changes
-    let display_ctx = DisplayContext::new(repo_root.clone(), current_dir);
-    let has_changes = display_status_changes(
-        &fs_files,
-        indexed_files,
-        &ignored_files,
-        &repo_root,
-        &display_ctx,
-        &index,
-        verbose,
-    )?;
+    // Display deleted files (must wait until scan is complete)
+    let has_deletes = display_deleted_files(&fs_files, indexed_files, &display_ctx)?;
 
-    if !verbose && !has_changes {
+    if !verbose && !has_changes && !has_deletes {
         println!("No changes");
     }
 

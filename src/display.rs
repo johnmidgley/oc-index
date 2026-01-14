@@ -31,7 +31,8 @@ impl DisplayContext {
         }
     }
 
-    /// Create a FileEntry with a display path for output
+    /// Create a FileEntry with a display path for output (computes hash)
+    #[allow(dead_code)]
     pub fn create_display_entry(&self, full_path: &Path, display_path: String) -> Result<FileEntry> {
         let num_bytes = file_utils::get_file_size(full_path)?;
         let modified = file_utils::get_modified_time(full_path)?;
@@ -41,6 +42,19 @@ impl DisplayContext {
             num_bytes,
             modified,
             sha256,
+            path: display_path,
+        })
+    }
+
+    /// Create a FileEntry for status display (without computing hash)
+    pub fn create_status_entry(&self, full_path: &Path, display_path: String) -> Result<FileEntry> {
+        let num_bytes = file_utils::get_file_size(full_path)?;
+        let modified = file_utils::get_modified_time(full_path)?;
+
+        Ok(FileEntry {
+            num_bytes,
+            modified,
+            sha256: String::new(), // Empty hash for status display
             path: display_path,
         })
     }
