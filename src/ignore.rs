@@ -82,62 +82,99 @@ pub fn add_pattern(repo_root: &Path, pattern: &str) -> Result<()> {
     Ok(())
 }
 
-/// Check if a path should be ignored based on patterns from ignore
-pub fn should_ignore(path: &Path, patterns: &[String]) -> bool {
-    let path_str = path.to_string_lossy();
-    
-    // Always ignore the .oci directory itself
-    if path_str.contains("/.oci/") || path_str.ends_with("/.oci") || 
-       path_str.starts_with(".oci/") || path_str == ".oci" {
+/// Check if a path is the .oci directory
+fn is_oci_directory(path_str: &str) -> bool {
+    path_str.contains("/.oci/")
+        || path_str.ends_with("/.oci")
+        || path_str.starts_with(".oci/")
+        || path_str == ".oci"
+}
+
+/// Check if a pattern matches the full path
+fn matches_full_path(glob_pattern: &Pattern, path_str: &str) -> bool {
+    glob_pattern.matches(path_str)
+}
+
+/// Check if a pattern matches just the filename
+fn matches_filename(glob_pattern: &Pattern, path: &Path) -> bool {
+    if let Some(file_name) = path.file_name() {
+        glob_pattern.matches(&file_name.to_string_lossy())
+    } else {
+        false
+    }
+}
+
+/// Check if a directory pattern matches the path or any of its parents
+fn matches_directory_pattern(pattern: &str, path: &Path, path_str: &str) -> bool {
+    let dir_pattern = pattern.trim_end_matches('/');
+
+    // Try matching with glob for patterns like *.photoslibrary/resources/derivatives
+    if let Ok(glob) = Pattern::new(&format!("{}/**", dir_pattern)) {
+        if glob.matches(path_str) {
+            return true;
+        }
+    }
+
+    // Also check literal directory prefix match for simple patterns
+    if path_str.starts_with(&format!("{}/", dir_pattern)) {
         return true;
     }
-    
-    for pattern in patterns {
-        // Try to match the pattern
-        if let Ok(glob_pattern) = Pattern::new(pattern) {
-            if glob_pattern.matches(&path_str) {
+
+    // Check each parent component
+    let mut current = path;
+    while let Some(parent) = current.parent() {
+        let parent_str = parent.to_string_lossy();
+        if let Ok(glob) = Pattern::new(dir_pattern) {
+            if glob.matches(&parent_str) {
                 return true;
             }
-            
-            // Also try matching just the file name
-            if let Some(file_name) = path.file_name() {
-                if glob_pattern.matches(&file_name.to_string_lossy()) {
-                    return true;
-                }
-            }
-            
-            // For directory patterns (ending with /), check if any parent matches
-            if pattern.ends_with('/') {
-                // Check if the path or any of its parent directories match the pattern
-                let dir_pattern = pattern.trim_end_matches('/');
-                
-                // Try matching with glob for patterns like *.photoslibrary/resources/derivatives
-                if let Ok(glob) = Pattern::new(&format!("{}/**", dir_pattern)) {
-                    if glob.matches(&path_str) {
-                        return true;
-                    }
-                }
-                
-                // Also check literal directory prefix match for simple patterns
-                if path_str.starts_with(&format!("{}/", dir_pattern)) {
-                    return true;
-                }
-                
-                // Check each parent component
-                let mut current = path;
-                while let Some(parent) = current.parent() {
-                    let parent_str = parent.to_string_lossy();
-                    if let Ok(glob) = Pattern::new(dir_pattern) {
-                        if glob.matches(&parent_str) {
-                            return true;
-                        }
-                    }
-                    current = parent;
-                }
+        }
+        current = parent;
+    }
+
+    false
+}
+
+/// Check if a pattern matches the given path
+fn pattern_matches(pattern: &str, path: &Path, path_str: &str) -> bool {
+    if let Ok(glob_pattern) = Pattern::new(pattern) {
+        // Try full path match
+        if matches_full_path(&glob_pattern, path_str) {
+            return true;
+        }
+
+        // Try filename match
+        if matches_filename(&glob_pattern, path) {
+            return true;
+        }
+
+        // For directory patterns, check parent matches
+        if pattern.ends_with('/') {
+            if matches_directory_pattern(pattern, path, path_str) {
+                return true;
             }
         }
     }
-    
+
+    false
+}
+
+/// Check if a path should be ignored based on patterns from ignore
+pub fn should_ignore(path: &Path, patterns: &[String]) -> bool {
+    let path_str = path.to_string_lossy();
+
+    // Always ignore the .oci directory itself
+    if is_oci_directory(&path_str) {
+        return true;
+    }
+
+    // Check each pattern
+    for pattern in patterns {
+        if pattern_matches(pattern, path, &path_str) {
+            return true;
+        }
+    }
+
     false
 }
 

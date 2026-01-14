@@ -3,6 +3,9 @@ mod commands;
 mod file_utils;
 mod ignore;
 mod config;
+mod scanner;
+mod display;
+mod dir_utils;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
