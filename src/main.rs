@@ -85,6 +85,10 @@ enum Commands {
         /// Don't prune files matching source's ignore patterns
         #[arg(long)]
         no_ignore: bool,
+        
+        /// Prune files matching local ignore patterns
+        #[arg(long)]
+        ignored: bool,
     },
     
     /// Remove the index (opposite of init)
@@ -109,7 +113,7 @@ fn main() -> Result<()> {
         Commands::Ls { r } => commands::ls(r),
         Commands::Grep { hash } => commands::grep(&hash),
         Commands::Duplicates => commands::duplicates(),
-        Commands::Prune { source, purge, restore, force, no_ignore } => commands::prune(source, purge, restore, force, no_ignore),
+        Commands::Prune { source, purge, restore, force, no_ignore, ignored } => commands::prune(source, purge, restore, force, no_ignore, ignored),
         Commands::Deinit { f } => commands::deinit(f),
         Commands::Stats => commands::stats(),
     }

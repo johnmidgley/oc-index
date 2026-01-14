@@ -355,10 +355,11 @@ oci prune <source>
 
 where `<source>` is a path to another `oci` index. If there are any pending updates in either the local or source index (i.e. `status` shows changes), the prune exits with an error. 
 
-If there are no pending changes, the prune command removes two types of files:
+If there are no pending changes, the prune command can remove the following types of files:
 
 1. **Duplicate files** - Any file in the local index that is also in the `<source>` index, determined by matching SHA256 hash
-2. **Ignored files** - Any file in the local index that matches the ignore patterns defined in the `<source>` index's `.ocignore` file
+2. **Source-ignored files** - Any file in the local index that matches the ignore patterns defined in the `<source>` index's `.ocignore` file
+3. **Local-ignored files** - When the `--ignored` flag is used, any file that matches the ignore patterns defined in the local `.ocignore` file
 
 All pruned files are moved to `.oci/pruneyard/<path>` where path is the previous relative path to the file in the local index. After moving files, any empty directories are automatically removed. The output shows which files were pruned and the reason:
 
@@ -375,6 +376,20 @@ To only prune duplicate files and skip checking the source's ignore patterns, us
 ```
 oci prune <source> --no-ignore
 ```
+
+To prune files matching the local `.ocignore` patterns (in addition to duplicates and source ignore patterns), use:
+
+```
+oci prune <source> --ignored
+```
+
+To prune only files matching the local `.ocignore` patterns without comparing to a source index:
+
+```
+oci prune --ignored
+```
+
+This is useful for cleaning up ignored files from your local repository without needing a source index for comparison.
 
 To restore all pruned files back to their original locations, call:
 

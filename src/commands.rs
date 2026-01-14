@@ -510,7 +510,7 @@ pub fn duplicates() -> Result<()> {
 }
 
 /// Prune files that exist in another index
-pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no_ignore: bool) -> Result<()> {
+pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no_ignore: bool, ignored: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     
     if restore {
@@ -606,14 +606,19 @@ pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no
         return Ok(());
     }
     
-    // Need source path for prune operation
-    let source_path = source
-        .ok_or_else(|| anyhow::anyhow!("Source path is required for prune operation"))?;
-    
     // Check for pending changes in local index
     if has_pending_changes(&repo_root)? {
         bail!("Cannot prune: there are pending changes in the local index. Run 'oci status' to see changes.");
     }
+    
+    // If --ignored flag is present without a source, just prune local ignored files
+    if ignored && source.is_none() {
+        return prune_local_ignored_files(&repo_root);
+    }
+    
+    // Need source path for prune operation (unless only using --ignored)
+    let source_path = source
+        .ok_or_else(|| anyhow::anyhow!("Source path is required for prune operation (unless using --ignored without source)"))?;
     
     // Load local and source indices
     let mut local_index = Index::load(&repo_root)?;
@@ -656,6 +661,13 @@ pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no
     // Get all files from local index
     let local_files = local_index.get_dir_files_recursive("")?;
     
+    // Load local ignore patterns if --ignored flag is present
+    let local_patterns = if ignored {
+        ignore::load_patterns(&repo_root)?
+    } else {
+        Vec::new()
+    };
+    
     // Find files to prune - store as (path, reason, in_index)
     let mut files_to_prune: Vec<(String, String, bool)> = Vec::new();
     
@@ -679,13 +691,23 @@ pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no
             }
         }
         
+        // Check if file matches local ignore patterns (if --ignored flag is present)
+        if ignored && !local_patterns.is_empty() {
+            let path = Path::new(&local_entry.path);
+            if ignore::should_ignore(path, &local_patterns) {
+                should_prune = true;
+                prune_reason = "ignored".to_string();
+            }
+        }
+        
         if should_prune {
             files_to_prune.push((local_entry.path.clone(), prune_reason, true));
         }
     }
     
-    // Also check for files on filesystem that match source ignore patterns but aren't in local index
-    if !no_ignore && !source_patterns.is_empty() {
+    // Also check for files on filesystem that match ignore patterns but aren't in local index
+    let check_fs_ignored = (!no_ignore && !source_patterns.is_empty()) || (ignored && !local_patterns.is_empty());
+    if check_fs_ignored {
         for entry in WalkDir::new(&repo_root).into_iter()
             .filter_entry(|e| {
                 // Don't walk into .oci directory
@@ -714,8 +736,16 @@ pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no
                 }
                 
                 // Check if file matches source ignore patterns
-                if ignore::should_ignore(rel_path, &source_patterns) {
-                    files_to_prune.push((rel_path_str, "ignored".to_string(), false));
+                if !no_ignore && ignore::should_ignore(rel_path, &source_patterns) {
+                    files_to_prune.push((rel_path_str.clone(), "ignored".to_string(), false));
+                }
+                
+                // Check if file matches local ignore patterns (if --ignored flag is present)
+                if ignored && ignore::should_ignore(rel_path, &local_patterns) {
+                    // Only add if not already in list
+                    if !files_to_prune.iter().any(|(p, _, _)| p == &rel_path_str) {
+                        files_to_prune.push((rel_path_str, "ignored".to_string(), false));
+                    }
                 }
             }
         }
@@ -886,6 +916,120 @@ pub fn stats() -> Result<()> {
     }
     
     println!("  Storage efficiency: {:.2}%", storage_efficiency);
+    
+    Ok(())
+}
+
+/// Prune files matching local ignore patterns
+fn prune_local_ignored_files(repo_root: &Path) -> Result<()> {
+    let mut local_index = Index::load(repo_root)?;
+    let local_patterns = ignore::load_patterns(repo_root)?;
+    
+    if local_patterns.is_empty() {
+        println!("No ignore patterns defined in local .ocignore");
+        return Ok(());
+    }
+    
+    // Find files to prune - store as (path, in_index)
+    let mut files_to_prune: Vec<(String, bool)> = Vec::new();
+    
+    // Check files in the index
+    let local_files = local_index.get_dir_files_recursive("")?;
+    for local_entry in &local_files {
+        let path = Path::new(&local_entry.path);
+        if ignore::should_ignore(path, &local_patterns) {
+            files_to_prune.push((local_entry.path.clone(), true));
+        }
+    }
+    
+    // Check files on filesystem that aren't in the index
+    for entry in WalkDir::new(repo_root).into_iter()
+        .filter_entry(|e| {
+            // Don't walk into .oci directory
+            if let Ok(rel) = e.path().strip_prefix(repo_root) {
+                let rel_str = rel.to_string_lossy();
+                !rel_str.starts_with(".oci")
+            } else {
+                true
+            }
+        }) {
+        let entry = entry?;
+        
+        if entry.file_type().is_file() {
+            let rel_path = entry.path().strip_prefix(repo_root)
+                .context("Path is outside repository")?;
+            let rel_path_str = rel_path.to_string_lossy().to_string();
+            
+            // Skip if already in our prune list
+            if files_to_prune.iter().any(|(p, _)| p == &rel_path_str) {
+                continue;
+            }
+            
+            // Skip if in local index (we already checked those above)
+            if local_index.get(&rel_path_str)?.is_some() {
+                continue;
+            }
+            
+            // Check if file matches local ignore patterns
+            if ignore::should_ignore(rel_path, &local_patterns) {
+                files_to_prune.push((rel_path_str, false));
+            }
+        }
+    }
+    
+    if files_to_prune.is_empty() {
+        println!("No ignored files to prune");
+        return Ok(());
+    }
+    
+    // Create pruneyard directory
+    let pruneyard_path = repo_root.join(OCI_DIR).join("pruneyard");
+    fs::create_dir_all(&pruneyard_path)
+        .context("Failed to create pruneyard directory")?;
+    
+    let mut pruned_count = 0;
+    
+    // Move files to pruneyard
+    for (path, in_index) in files_to_prune {
+        let source_file = repo_root.join(&path);
+        let dest_file = pruneyard_path.join(&path);
+        
+        // Create parent directories in pruneyard
+        if let Some(parent) = dest_file.parent() {
+            fs::create_dir_all(parent)
+                .context(format!("Failed to create directory: {}", parent.display()))?;
+        }
+        
+        // Move the file
+        fs::rename(&source_file, &dest_file)
+            .context(format!("Failed to move file: {}", source_file.display()))?;
+        
+        // Remove empty parent directories
+        remove_empty_dirs(&source_file, repo_root)?;
+        
+        // Remove from index if it was in the index
+        if in_index {
+            local_index.remove(&path)?;
+        }
+        
+        println!("Pruned (ignored): {}", path);
+        pruned_count += 1;
+    }
+    
+    local_index.save(repo_root)?;
+    
+    // Clean up any remaining empty directories
+    let empty_dirs_removed = remove_all_empty_dirs(repo_root)?;
+    
+    if pruned_count > 0 {
+        println!("Pruned {} ignored file(s) to .oci/pruneyard/", pruned_count);
+    } else {
+        println!("Pruned 0 file(s)");
+    }
+    
+    if empty_dirs_removed > 0 {
+        println!("Removed {} empty director{}", empty_dirs_removed, if empty_dirs_removed == 1 { "y" } else { "ies" });
+    }
     
     Ok(())
 }

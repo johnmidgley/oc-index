@@ -878,3 +878,131 @@ fn test_update_dot_from_subdirectory_with_spaces() {
     assert_eq!(exit_code, 0);
     assert!(stdout.contains("No changes"));
 }
+
+#[test]
+fn test_prune_ignored_flag_with_source() {
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize both repositories
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+    
+    // Add ignore pattern to local .ocignore (not source)
+    run_oci(&["ignore", "*.tmp"], local_dir.path());
+    
+    // Create files in source
+    fs::write(source_dir.path().join("shared.txt"), "shared content").unwrap();
+    run_oci(&["update"], source_dir.path());
+    
+    // Create files in local (including a .tmp file and a duplicate)
+    fs::write(local_dir.path().join("shared.txt"), "shared content").unwrap();
+    fs::write(local_dir.path().join("temp.tmp"), "temporary file").unwrap();
+    fs::write(local_dir.path().join("unique.txt"), "keep this").unwrap();
+    run_oci(&["update"], local_dir.path());
+    
+    // Prune local using source with --ignored flag
+    // Should remove both the duplicate and the locally ignored file
+    let source_path = source_dir.path().to_str().unwrap();
+    let (stdout, _, exit_code) = run_oci(&["prune", source_path, "--ignored"], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Pruned 2 file(s)"));
+    assert!(stdout.contains("shared.txt"));
+    assert!(stdout.contains("temp.tmp"));
+    assert!(stdout.contains("1 duplicates, 1 ignored"));
+    
+    // Verify files were pruned
+    assert!(!local_dir.path().join("shared.txt").exists());
+    assert!(!local_dir.path().join("temp.tmp").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/shared.txt").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/temp.tmp").exists());
+    
+    // Verify unique.txt still exists
+    assert!(local_dir.path().join("unique.txt").exists());
+}
+
+#[test]
+fn test_prune_ignored_flag_without_source() {
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize repository
+    run_oci(&["init"], local_dir.path());
+    
+    // Add ignore patterns to local .ocignore
+    run_oci(&["ignore", "*.log"], local_dir.path());
+    run_oci(&["ignore", "*.tmp"], local_dir.path());
+    
+    // Create files (including ignored files)
+    fs::write(local_dir.path().join("important.txt"), "keep this").unwrap();
+    fs::write(local_dir.path().join("debug.log"), "remove this").unwrap();
+    fs::write(local_dir.path().join("cache.tmp"), "remove this too").unwrap();
+    
+    // Update index - ignored files won't be added to index
+    run_oci(&["update"], local_dir.path());
+    
+    // Verify only important.txt is in the index
+    let (stdout, _, _) = run_oci(&["ls"], local_dir.path());
+    assert!(stdout.contains("important.txt"));
+    assert!(!stdout.contains("debug.log"));
+    assert!(!stdout.contains("cache.tmp"));
+    
+    // Prune using --ignored flag without source
+    let (stdout, _, exit_code) = run_oci(&["prune", "--ignored"], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Pruned 2 ignored file(s)"));
+    assert!(stdout.contains("debug.log"));
+    assert!(stdout.contains("cache.tmp"));
+    
+    // Verify ignored files were pruned
+    assert!(!local_dir.path().join("debug.log").exists());
+    assert!(!local_dir.path().join("cache.tmp").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/debug.log").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/cache.tmp").exists());
+    
+    // Verify important.txt still exists
+    assert!(local_dir.path().join("important.txt").exists());
+}
+
+#[test]
+fn test_prune_ignored_flag_with_indexed_ignored_files() {
+    let local_dir = TempDir::new().unwrap();
+    
+    // Initialize repository
+    run_oci(&["init"], local_dir.path());
+    
+    // Create files and add them to index
+    fs::write(local_dir.path().join("important.txt"), "keep this").unwrap();
+    fs::write(local_dir.path().join("old_cache.tmp"), "was not ignored initially").unwrap();
+    run_oci(&["update"], local_dir.path());
+    
+    // Now add ignore pattern for .tmp files and create a new ignored file
+    run_oci(&["ignore", "*.tmp"], local_dir.path());
+    
+    // The old .tmp file is still in the index (but now matches ignore patterns)
+    // Run update to sync the index with current ignore patterns
+    run_oci(&["update"], local_dir.path());
+    
+    // The .tmp file should be removed from index by update (since it's now ignored)
+    let (stdout, _, _) = run_oci(&["ls"], local_dir.path());
+    assert!(!stdout.contains("old_cache.tmp"), "Ignored file should be removed from index by update");
+    
+    // But the file still exists on filesystem
+    assert!(local_dir.path().join("old_cache.tmp").exists());
+    
+    // Prune using --ignored flag - should move ignored files from filesystem to pruneyard
+    let (stdout, stderr, exit_code) = run_oci(&["prune", "--ignored"], local_dir.path());
+    if exit_code != 0 {
+        eprintln!("stdout: {}", stdout);
+        eprintln!("stderr: {}", stderr);
+    }
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Pruned 1 ignored file(s)"));
+    assert!(stdout.contains("old_cache.tmp"));
+    
+    // Verify file was pruned from filesystem
+    assert!(!local_dir.path().join("old_cache.tmp").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/old_cache.tmp").exists());
+    
+    // Verify important.txt still exists
+    assert!(local_dir.path().join("important.txt").exists());
+}
