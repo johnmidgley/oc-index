@@ -56,7 +56,7 @@ pub fn init() -> Result<()> {
     let config = Config::new();
     config.save(&current_dir)?;
     
-    // Initialize ocignore with default patterns
+    // Initialize ignore with default patterns
     ignore::init_ignore_file(&current_dir)?;
     
     println!("Initialized empty oci index in {}", oci_dir.display());
@@ -87,7 +87,7 @@ pub fn ignore(pattern: Option<String>) -> Result<()> {
     };
     
     ignore::add_pattern(&repo_root, &pattern_to_add)?;
-    println!("Added pattern to ocignore: {}", pattern_to_add);
+    println!("Added pattern to ignore: {}", pattern_to_add);
     
     Ok(())
 }
@@ -974,7 +974,7 @@ fn prune_local_ignored_files(repo_root: &Path) -> Result<()> {
     let local_patterns = ignore::load_patterns(repo_root)?;
     
     if local_patterns.is_empty() {
-        println!("No ignore patterns defined in local ocignore");
+        println!("No ignore patterns defined in local ignore");
         return Ok(());
     }
     

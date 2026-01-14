@@ -51,14 +51,14 @@ TODO - It looks like update and status could be abstracted better to both use a 
    
    Without canonicalization, paths like "Google Drive/Papers/./file.txt" won't match "Google Drive/Papers/file.txt" in HashSet lookups, causing files to incorrectly appear as both added and deleted.
 
-5. **Ignore Patterns**: Uses the `glob` crate for pattern matching, supporting wildcards similar to `.gitignore`. During initialization (`oci init`), an `ocignore` file is created with conservative default patterns for common intermediate/derived files. These defaults are written to the file (not hardcoded in the application), making them transparent and editable by users. The patterns favor specificity over breadth to avoid false positives:
+5. **Ignore Patterns**: Uses the `glob` crate for pattern matching, supporting wildcards similar to `.gitignore`. During initialization (`oci init`), an `ignore` file is created with conservative default patterns for common intermediate/derived files. These defaults are written to the file (not hardcoded in the application), making them transparent and editable by users. The patterns favor specificity over breadth to avoid false positives:
    - Package manager dependencies and caches (e.g., `node_modules/`, `.npm/`)
    - Tool-specific caches (e.g., `.pytest_cache/`, `.mypy_cache/`)
    - Intermediate compiled files (e.g., `*.o`, `*.class`, `*.pyc`)
    - Framework-specific build directories (e.g., `.next/`, `.nuxt/`)
    - Editor temporary files (e.g., `*.swp`, `*~`)
    
-   Generic directory names like `build/`, `dist/`, `bin/`, and `out/` are intentionally NOT included in defaults as they could be legitimate organizational directories. Similarly, final artifacts (executables, libraries) and IDE project files are not included. Users can modify `ocignore` directly or use `oci ignore [pattern]` to add custom patterns.
+   Generic directory names like `build/`, `dist/`, `bin/`, and `out/` are intentionally NOT included in defaults as they could be legitimate organizational directories. Similarly, final artifacts (executables, libraries) and IDE project files are not included. Users can modify `ignore` directly or use `oci ignore [pattern]` to add custom patterns.
 
 6. **Version Tracking**: The tool maintains a `config` file in the `.oci` directory that stores the version of the tool that created the index. This version is checked on every command execution, and a warning is displayed if there's a mismatch between the index version and the current tool version. The version is obtained at compile time from `Cargo.toml` using `env!("CARGO_PKG_VERSION")` and embedded in the binary. For backward compatibility, if a config file doesn't exist (e.g., in indexes created before this feature was added), one is automatically created with the current tool version. The version checking helps users identify potential compatibility issues when upgrading the tool.
 

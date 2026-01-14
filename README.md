@@ -53,7 +53,7 @@ oci init
 
 This will first check that there is not an existing index (located in the .oci directory). If the directory already exists, the user is warned with an error and the tool exits. If the directory does not exist, then an empty index is created along with:
 - A `config` file containing the tool version
-- An `ocignore` file with default ignore patterns (see the [ignore](#ignore) section below)
+- An `ignore` file with default ignore patterns (see the [ignore](#ignore) section below)
 
 The `config` file stores the version of the tool that created the index. This version is checked whenever you run any oci command, and a warning is displayed if there's a version mismatch between the index and the current tool version. 
 
@@ -93,11 +93,11 @@ For files that should be ignored by oci (i.e. not included in the index and igno
 oci ignore [pattern]
 ```
 
-where `pattern` is optional and can be a file, directory, or arbirary path pattern (like git). Patterns that are to be ignored are stored in the `.oci/ocignore` file. If `pattern` is a relative path, it is expanded to be a path from the root of the repository before added to the ignore file. If `pattern` is ommited, then the current directory is used.
+where `pattern` is optional and can be a file, directory, or arbirary path pattern (like git). Patterns that are to be ignored are stored in the `.oci/ignore` file. If `pattern` is a relative path, it is expanded to be a path from the root of the repository before added to the ignore file. If `pattern` is ommited, then the current directory is used.
 
 ### Default Ignore Patterns
 
-When you run `oci init`, an `ocignore` file is created with a conservative set of default ignore patterns for common intermediate and derived files. **You can edit this file directly** to add, remove, or modify patterns as needed for your project.
+When you run `oci init`, an `ignore` file is created with a conservative set of default ignore patterns for common intermediate and derived files. **You can edit this file directly** to add, remove, or modify patterns as needed for your project.
 
 The default patterns include:
 
@@ -170,15 +170,15 @@ The default patterns include:
 - `Library/Caches/` (macOS)
 - `AppData/Local/Temp/`, `AppData/Local/Cache/` (Windows)
 
-The `.oci` directory itself is always ignored regardless of patterns in `ocignore`.
+The `.oci` directory itself is always ignored regardless of patterns in `ignore`.
 
 **Important Notes:**
 - The default list is **intentionally conservative** to avoid accidentally ignoring legitimate files
 - Generic directory names like `build/`, `dist/`, `bin/`, and `out/` are **NOT** included in the defaults
 - Final build artifacts (like `*.exe`, `*.dll`, `*.so`, `*.jar`) are **NOT** included in the defaults
 - IDE project files (like `.vscode/`, `.idea/`) are **NOT** included in the defaults
-- You can remove any default patterns from `ocignore` if they don't fit your use case
-- You can add custom patterns using `oci ignore [pattern]` or by editing `ocignore` directly 
+- You can remove any default patterns from `ignore` if they don't fit your use case
+- You can add custom patterns using `oci ignore [pattern]` or by editing `ignore` directly 
 
 ## status
 
@@ -196,7 +196,7 @@ A file is considered not changed if its size and last modified time match the in
 - `-` - File exists in the index but not in the filesystem (deleted file)
 - `U` - File has been modified from what the index contains (updated file)
 - `=` - File is unchanged (only shown with `-v` flag)
-- `I` - File is ignored by patterns in `ocignore` (only shown with `-v` flag)
+- `I` - File is ignored by patterns in `ignore` (only shown with `-v` flag)
 
 Files are output in a human readable format with the following fields
 
@@ -239,7 +239,7 @@ Each file being processed is displayed with a prefix indicating the operation:
 - `U` - File is being **updated** (hash or metadata changed)
 - `-` - File is being **removed** from the index (deleted from filesystem)
 - `=` - File is unchanged (only shown with `-v` flag)
-- `I` - File is ignored by patterns in `ocignore` (only shown with `-v` flag)
+- `I` - File is ignored by patterns in `ignore` (only shown with `-v` flag)
 
 Example output:
 ```
@@ -380,8 +380,8 @@ where `<source>` is a path to another `oci` index. If there are any pending upda
 If there are no pending changes, the prune command can remove the following types of files:
 
 1. **Duplicate files** - Any file in the local index that is also in the `<source>` index, determined by matching SHA256 hash
-2. **Source-ignored files** - Any file in the local index that matches the ignore patterns defined in the `<source>` index's `ocignore` file
-3. **Local-ignored files** - When the `--ignored` flag is used, any file that matches the ignore patterns defined in the local `ocignore` file
+2. **Source-ignored files** - Any file in the local index that matches the ignore patterns defined in the `<source>` index's `ignore` file
+3. **Local-ignored files** - When the `--ignored` flag is used, any file that matches the ignore patterns defined in the local `ignore` file
 
 All pruned files are moved to `.oci/pruneyard/<path>` where path is the previous relative path to the file in the local index. After moving files, any empty directories are automatically removed. The output shows which files were pruned and the reason:
 
@@ -399,13 +399,13 @@ To only prune duplicate files and skip checking the source's ignore patterns, us
 oci prune <source> --no-ignore
 ```
 
-To prune files matching the local `ocignore` patterns (in addition to duplicates and source ignore patterns), use:
+To prune files matching the local `ignore` patterns (in addition to duplicates and source ignore patterns), use:
 
 ```
 oci prune <source> --ignored
 ```
 
-To prune only files matching the local `ocignore` patterns without comparing to a source index:
+To prune only files matching the local `ignore` patterns without comparing to a source index:
 
 ```
 oci prune --ignored

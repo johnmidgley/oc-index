@@ -3,27 +3,35 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use glob::Pattern;
 
-const OCIGNORE_FILE: &str = "ocignore";
+const OCIGNORE_FILE: &str = "ignore";
 
-/// Get default ignore patterns as a formatted string for writing to ocignore
+/// Get default ignore patterns as a formatted string for writing to ignore
 /// These are common intermediate/derived files that are typically not tracked
 /// Users can modify or remove these patterns as needed
 /// 
 /// The patterns are loaded from a resource file embedded at compile time
 pub fn default_ignore_content() -> String {
-    include_str!("default_ocignore").to_string()
+    include_str!("default_ignore").to_string()
 }
 
-/// Load ignore patterns from ocignore file
+/// Load ignore patterns from ignore file
 pub fn load_patterns(repo_root: &Path) -> Result<Vec<String>> {
     let ignore_path = repo_root.join(crate::index::OCI_DIR).join(OCIGNORE_FILE);
     
+    // Migration: Check for old ocignore file and rename it
     if !ignore_path.exists() {
-        return Ok(Vec::new());
+        let old_ignore_path = repo_root.join(crate::index::OCI_DIR).join("ocignore");
+        if old_ignore_path.exists() {
+            // Rename ocignore to ignore for backward compatibility
+            fs::rename(&old_ignore_path, &ignore_path)
+                .context("Failed to migrate ocignore to ignore")?;
+        } else {
+            return Ok(Vec::new());
+        }
     }
     
     let contents = fs::read_to_string(&ignore_path)
-        .context("Failed to read ocignore file")?;
+        .context("Failed to read ignore file")?;
     
     Ok(contents.lines()
         .map(|s| s.trim())
@@ -32,7 +40,7 @@ pub fn load_patterns(repo_root: &Path) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Initialize ocignore file with default patterns
+/// Initialize ignore file with default patterns
 pub fn init_ignore_file(repo_root: &Path) -> Result<()> {
     let oci_dir = repo_root.join(crate::index::OCI_DIR);
     let ignore_path = oci_dir.join(OCIGNORE_FILE);
@@ -40,13 +48,13 @@ pub fn init_ignore_file(repo_root: &Path) -> Result<()> {
     // Only write defaults if file doesn't exist
     if !ignore_path.exists() {
         fs::write(&ignore_path, default_ignore_content())
-            .context("Failed to create ocignore file")?;
+            .context("Failed to create ignore file")?;
     }
     
     Ok(())
 }
 
-/// Add a pattern to the ocignore file
+/// Add a pattern to the ignore file
 pub fn add_pattern(repo_root: &Path, pattern: &str) -> Result<()> {
     let oci_dir = repo_root.join(crate::index::OCI_DIR);
     fs::create_dir_all(&oci_dir)
@@ -56,7 +64,7 @@ pub fn add_pattern(repo_root: &Path, pattern: &str) -> Result<()> {
     
     let mut patterns = if ignore_path.exists() {
         fs::read_to_string(&ignore_path)
-            .context("Failed to read ocignore file")?
+            .context("Failed to read ignore file")?
     } else {
         String::new()
     };
@@ -69,12 +77,12 @@ pub fn add_pattern(repo_root: &Path, pattern: &str) -> Result<()> {
     patterns.push('\n');
     
     fs::write(&ignore_path, patterns)
-        .context("Failed to write ocignore file")?;
+        .context("Failed to write ignore file")?;
     
     Ok(())
 }
 
-/// Check if a path should be ignored based on patterns from ocignore
+/// Check if a path should be ignored based on patterns from ignore
 pub fn should_ignore(path: &Path, patterns: &[String]) -> bool {
     let path_str = path.to_string_lossy();
     
