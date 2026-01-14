@@ -50,14 +50,14 @@ TODO - It looks like update and status could be abstracted better to both use a 
    
    Without canonicalization, paths like "Google Drive/Papers/./file.txt" won't match "Google Drive/Papers/file.txt" in HashSet lookups, causing files to incorrectly appear as both added and deleted.
 
-5. **Ignore Patterns**: Uses the `glob` crate for pattern matching, supporting wildcards similar to `.gitignore`. During initialization (`oci init`), a `.ocignore` file is created with conservative default patterns for common intermediate/derived files. These defaults are written to the file (not hardcoded in the application), making them transparent and editable by users. The patterns favor specificity over breadth to avoid false positives:
+5. **Ignore Patterns**: Uses the `glob` crate for pattern matching, supporting wildcards similar to `.gitignore`. During initialization (`oci init`), an `ocignore` file is created with conservative default patterns for common intermediate/derived files. These defaults are written to the file (not hardcoded in the application), making them transparent and editable by users. The patterns favor specificity over breadth to avoid false positives:
    - Package manager dependencies and caches (e.g., `node_modules/`, `.npm/`)
    - Tool-specific caches (e.g., `.pytest_cache/`, `.mypy_cache/`)
    - Intermediate compiled files (e.g., `*.o`, `*.class`, `*.pyc`)
    - Framework-specific build directories (e.g., `.next/`, `.nuxt/`)
    - Editor temporary files (e.g., `*.swp`, `*~`)
    
-   Generic directory names like `build/`, `dist/`, `bin/`, and `out/` are intentionally NOT included in defaults as they could be legitimate organizational directories. Similarly, final artifacts (executables, libraries) and IDE project files are not included. Users can modify `.ocignore` directly or use `oci ignore [pattern]` to add custom patterns.
+   Generic directory names like `build/`, `dist/`, `bin/`, and `out/` are intentionally NOT included in defaults as they could be legitimate organizational directories. Similarly, final artifacts (executables, libraries) and IDE project files are not included. Users can modify `ocignore` directly or use `oci ignore [pattern]` to add custom patterns.
 
 6. **Duplicate File Counting**: The `duplicates` and `stats` commands use consistent methodology for counting duplicates. When files share the same hash (indicating identical content), all files in the duplicate group are counted as duplicates, not just the "extra" copies. For example, if 3 files have identical content, the duplicate count is 3 (not 2). This makes the output consistent between both commands and clearer for users understanding how many files are involved in duplication.
 

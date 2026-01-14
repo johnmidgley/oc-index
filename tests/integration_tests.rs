@@ -76,15 +76,16 @@ fn test_init_creates_ocignore_with_defaults() {
     
     assert_eq!(exit_code, 0);
     
-    // Verify .ocignore file exists
-    let ocignore_path = temp_dir.path().join(".oci/.ocignore");
-    assert!(ocignore_path.exists(), ".ocignore file should be created");
+    // Verify ocignore file exists
+    let ocignore_path = temp_dir.path().join(".oci/ocignore");
+    assert!(ocignore_path.exists(), "ocignore file should be created");
     
     // Verify it contains default patterns
     let contents = fs::read_to_string(&ocignore_path).unwrap();
     assert!(contents.contains("node_modules/"), "Should contain node_modules pattern");
     assert!(contents.contains("*.pyc"), "Should contain .pyc pattern");
     assert!(contents.contains(".DS_Store"), "Should contain .DS_Store pattern");
+    assert!(contents.contains("Library/Application Support/MobileSync/"), "Should contain MobileSync pattern");
     assert!(contents.contains("# Default ignore patterns"), "Should contain header comment");
 }
 
@@ -888,7 +889,7 @@ fn test_prune_ignored_flag_with_source() {
     run_oci(&["init"], source_dir.path());
     run_oci(&["init"], local_dir.path());
     
-    // Add ignore pattern to local .ocignore (not source)
+    // Add ignore pattern to local ocignore (not source)
     run_oci(&["ignore", "*.tmp"], local_dir.path());
     
     // Create files in source
@@ -928,7 +929,7 @@ fn test_prune_ignored_flag_without_source() {
     // Initialize repository
     run_oci(&["init"], local_dir.path());
     
-    // Add ignore patterns to local .ocignore
+    // Add ignore patterns to local ocignore
     run_oci(&["ignore", "*.log"], local_dir.path());
     run_oci(&["ignore", "*.tmp"], local_dir.path());
     

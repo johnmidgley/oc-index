@@ -42,7 +42,7 @@ pub fn init() -> Result<()> {
     let index = Index::new()?;
     index.save(&current_dir)?;
     
-    // Initialize .ocignore with default patterns
+    // Initialize ocignore with default patterns
     ignore::init_ignore_file(&current_dir)?;
     
     println!("Initialized empty oci index in {}", oci_dir.display());
@@ -72,7 +72,7 @@ pub fn ignore(pattern: Option<String>) -> Result<()> {
     };
     
     ignore::add_pattern(&repo_root, &pattern_to_add)?;
-    println!("Added pattern to .ocignore: {}", pattern_to_add);
+    println!("Added pattern to ocignore: {}", pattern_to_add);
     
     Ok(())
 }
@@ -141,7 +141,16 @@ pub fn status(pattern: Option<String>, recursive: bool, verbose: bool) -> Result
         };
         
         for entry in walker {
-            let entry = entry?;
+            // Handle permission errors gracefully - skip and continue
+            let entry = match entry {
+                Ok(e) => e,
+                Err(err) => {
+                    if verbose {
+                        eprintln!("Warning: Skipping due to error: {}", err);
+                    }
+                    continue;
+                }
+            };
             if entry.file_type().is_file() {
                 let rel_path = entry.path().strip_prefix(&repo_root)
                     .context("Path is outside repository")?;
@@ -301,7 +310,16 @@ pub fn update(pattern: Option<String>, verbose: bool) -> Result<()> {
                     true
                 }
             }) {
-            let entry = entry?;
+            // Handle permission errors gracefully - skip and continue
+            let entry = match entry {
+                Ok(e) => e,
+                Err(err) => {
+                    if verbose {
+                        eprintln!("Warning: Skipping due to error: {}", err);
+                    }
+                    continue;
+                }
+            };
             
             if entry.file_type().is_file() {
                 let rel_path = entry.path().strip_prefix(&repo_root)
@@ -718,7 +736,14 @@ pub fn prune(source: Option<String>, purge: bool, restore: bool, force: bool, no
                     true
                 }
             }) {
-            let entry = entry?;
+            // Handle permission errors gracefully - skip and continue
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_err) => {
+                    // Silently skip permission errors during prune
+                    continue;
+                }
+            };
             
             if entry.file_type().is_file() {
                 let rel_path = entry.path().strip_prefix(&repo_root)
@@ -926,7 +951,7 @@ fn prune_local_ignored_files(repo_root: &Path) -> Result<()> {
     let local_patterns = ignore::load_patterns(repo_root)?;
     
     if local_patterns.is_empty() {
-        println!("No ignore patterns defined in local .ocignore");
+        println!("No ignore patterns defined in local ocignore");
         return Ok(());
     }
     
@@ -953,7 +978,14 @@ fn prune_local_ignored_files(repo_root: &Path) -> Result<()> {
                 true
             }
         }) {
-        let entry = entry?;
+        // Handle permission errors gracefully - skip and continue
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_err) => {
+                // Silently skip permission errors
+                continue;
+            }
+        };
         
         if entry.file_type().is_file() {
             let rel_path = entry.path().strip_prefix(repo_root)
@@ -1089,7 +1121,14 @@ fn has_pending_changes(repo_root: &Path) -> Result<bool> {
                 true // Don't filter if path conversion fails
             }
         }) {
-        let entry = entry?;
+        // Handle permission errors gracefully - skip and continue
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_err) => {
+                // Silently skip permission errors
+                continue;
+            }
+        };
         
         if entry.file_type().is_file() {
             let rel_path = entry.path().strip_prefix(repo_root)
