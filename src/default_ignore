@@ -120,3 +120,10 @@ Library/Application Support/MobileSync/
 Library/Caches/
 AppData/Local/Temp/
 AppData/Local/Cache/
+
+Music/Audio Music Apps/Databases/
+Music/Music/Media.localized/
+Pictures/Photos Library.photoslibrary/database/
+Library/CloudStorage/GoogleDrive*/
+Library/Application Support/BraveSoftware/
+Library/IdentityServices/
