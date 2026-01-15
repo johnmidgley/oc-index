@@ -47,6 +47,15 @@ oci deinit
 oci deinit -f
 ```
 
+## Important Note for Google Drive Users
+
+If you're using `oci` to track files in Google Drive, you should configure Google Drive to use **Mirror mode** instead of **Streaming mode**. 
+
+- **Mirror mode**: All files are stored locally on your computer, allowing oci to access and hash them properly
+- **Streaming mode**: Files are stored in the cloud and downloaded on-demand, which prevents oci from being able to reliably read and index files
+
+To change this setting, go to Google Drive preferences and select "Mirror files" instead of "Stream files".
+
 The following sections describe the sub-commands available in detail.
 
 ## init
