@@ -34,6 +34,12 @@ oci stats
 # Ignore patterns
 oci ignore "*.log"
 
+# Clear all entries from the index (with confirmation)
+oci reset
+
+# Or reset without confirmation
+oci reset -f
+
 # Remove the index (with confirmation)
 oci deinit
 
@@ -55,7 +61,7 @@ This will first check that there is not an existing index (located in the .oci d
 - A `config` file containing the tool version
 - An `ignore` file with default ignore patterns (see the [ignore](#ignore) section below)
 
-The `config` file stores the version of the tool that created the index. This version is checked whenever you run any oci command, and a warning is displayed if there's a version mismatch between the index and the current tool version. 
+The `config` file stores the version of the tool that created the index. This version is `checked` whenever you run any oci command, and a warning is displayed if there's a version mismatch between the index and the current tool version. 
 
 ### Version Tracking
 
@@ -432,6 +438,38 @@ This command checks for pending changes in the local index before proceeding. If
 ```
 oci prune --purge -f
 ```
+
+### Prune Output
+
+When pruning files, oci displays the total size of pruned files in a human-readable format:
+
+```
+Pruned 15 file(s) to .oci/pruneyard/ (10 duplicates, 5 ignored, 2.35 MB)
+```
+
+The size is automatically formatted in the most appropriate unit (bytes, KB, MB, or GB).
+
+## reset
+
+To clear all entries from the index while keeping the `.oci` directory structure intact, call
+
+```
+oci reset
+```
+
+This will ask for confirmation before clearing the index. To skip the confirmation prompt (useful for scripts), use the `-f` flag:
+
+```
+oci reset -f
+```
+
+This command removes all file entries from the index database but preserves the `.oci` directory, `config`, and `ignore` files. After reset:
+- The index will be empty (like a freshly initialized index)
+- Your files on the filesystem remain untouched
+- The `.oci` directory structure is preserved
+- You can run `oci update` to re-index files
+
+This is useful when you want to start fresh with the index without losing your ignore patterns or having to reinitialize.
 
 ## deinit
 

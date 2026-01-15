@@ -193,6 +193,65 @@ fn test_deinit_removes_index() {
 }
 
 #[test]
+fn test_reset_clears_index() {
+    let temp_dir = TempDir::new().unwrap();
+    run_oci(&["init"], temp_dir.path());
+    
+    // Create and index some files
+    fs::write(temp_dir.path().join("file1.txt"), "content1").unwrap();
+    fs::write(temp_dir.path().join("file2.txt"), "content2").unwrap();
+    fs::write(temp_dir.path().join("file3.txt"), "content3").unwrap();
+    
+    run_oci(&["update"], temp_dir.path());
+    
+    // Verify files are in the index
+    let (stdout, _, exit_code) = run_oci(&["ls"], temp_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("file1.txt"));
+    assert!(stdout.contains("file2.txt"));
+    assert!(stdout.contains("file3.txt"));
+    
+    // Stats should show 3 files
+    let (stdout, _, exit_code) = run_oci(&["stats"], temp_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Total files: 3"));
+    
+    // Reset with -f should clear all entries
+    let (stdout, _, exit_code) = run_oci(&["reset", "-f"], temp_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Reset index"));
+    
+    // .oci directory should still exist
+    assert!(temp_dir.path().join(".oci").exists());
+    assert!(temp_dir.path().join(".oci/index.db").exists());
+    assert!(temp_dir.path().join(".oci/config").exists());
+    assert!(temp_dir.path().join(".oci/ignore").exists());
+    
+    // Index should be empty
+    let (stdout, _, exit_code) = run_oci(&["ls"], temp_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("No files in index"));
+    
+    // Stats should show empty index
+    let (stdout, _, exit_code) = run_oci(&["stats"], temp_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Index is empty"));
+    
+    // Files should still exist on filesystem
+    assert!(temp_dir.path().join("file1.txt").exists());
+    assert!(temp_dir.path().join("file2.txt").exists());
+    assert!(temp_dir.path().join("file3.txt").exists());
+    
+    // Status should show all files as added (since index is empty)
+    let (stdout, _, exit_code) = run_oci(&["status"], temp_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("+ "));
+    assert!(stdout.contains("file1.txt"));
+    assert!(stdout.contains("file2.txt"));
+    assert!(stdout.contains("file3.txt"));
+}
+
+#[test]
 fn test_recursive_operations() {
     let temp_dir = TempDir::new().unwrap();
     run_oci(&["init"], temp_dir.path());

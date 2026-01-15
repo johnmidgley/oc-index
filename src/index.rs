@@ -92,6 +92,13 @@ impl Index {
         Ok(())
     }
 
+    /// Clear all entries from the index
+    pub fn clear(&mut self) -> Result<()> {
+        self.conn.execute("DELETE FROM files", [])
+            .context("Failed to clear index")?;
+        Ok(())
+    }
+
     /// Get a file entry
     pub fn get(&self, path: &str) -> Result<Option<FileEntry>> {
         let result = self.conn.query_row(

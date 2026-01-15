@@ -95,6 +95,13 @@ enum Commands {
         ignored: bool,
     },
     
+    /// Reset the index (clear all entries)
+    Reset {
+        /// Force reset without confirmation
+        #[arg(short)]
+        f: bool,
+    },
+    
     /// Remove the index (opposite of init)
     Deinit {
         /// Force removal without confirmation
@@ -118,6 +125,7 @@ fn main() -> Result<()> {
         Commands::Grep { hash } => commands::grep(&hash),
         Commands::Duplicates => commands::duplicates(),
         Commands::Prune { source, purge, restore, force, no_ignore, ignored } => commands::prune(source, purge, restore, force, no_ignore, ignored),
+        Commands::Reset { f } => commands::reset(f),
         Commands::Deinit { f } => commands::deinit(f),
         Commands::Stats => commands::stats(),
     }

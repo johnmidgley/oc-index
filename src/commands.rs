@@ -12,10 +12,28 @@ use crate::scanner::FileScanner;
 use crate::display::{DisplayContext, StatusMarker};
 use crate::dir_utils;
 
+/// Get the logical current directory, preserving symlinks
+/// PWD environment variable contains the logical path, while env::current_dir() resolves symlinks
+fn get_logical_current_dir() -> Result<PathBuf> {
+    // Try to use PWD if it's set and valid
+    if let Ok(pwd) = env::var("PWD") {
+        let pwd_path = PathBuf::from(&pwd);
+        // Validate that PWD actually points to the current directory
+        // by checking if it canonicalizes to the same place as env::current_dir()
+        if let (Ok(pwd_canonical), Ok(cwd_canonical)) = (pwd_path.canonicalize(), env::current_dir()) {
+            if pwd_canonical == cwd_canonical {
+                return Ok(pwd_path);
+            }
+        }
+    }
+    // Fall back to env::current_dir() if PWD is not set or invalid
+    env::current_dir().context("Failed to get current directory")
+}
+
 /// Find the repository root by looking for .oci directory
+/// Returns the logical (non-canonicalized) path to preserve user's view through symlinks
 fn find_repo_root() -> Result<PathBuf> {
-    let mut current_dir = env::current_dir()
-        .context("Failed to get current directory")?;
+    let mut current_dir = get_logical_current_dir()?;
     
     loop {
         let oci_path = current_dir.join(OCI_DIR);
@@ -26,6 +44,23 @@ fn find_repo_root() -> Result<PathBuf> {
         if !current_dir.pop() {
             bail!("Not in an oci repository (or any parent directory)");
         }
+    }
+}
+
+/// Format bytes in a human-readable format
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} bytes", bytes)
     }
 }
 
@@ -70,7 +105,7 @@ pub fn init() -> Result<()> {
 pub fn ignore(pattern: Option<String>) -> Result<()> {
     let repo_root = find_repo_root()?;
     check_version(&repo_root)?;
-    let current_dir = env::current_dir()?;
+    let current_dir = get_logical_current_dir()?;
     
     let pattern_to_add = if let Some(p) = pattern {
         // Convert relative path to absolute from repo root
@@ -103,25 +138,43 @@ fn determine_scan_target(
     current_dir: &Path,
 ) -> Result<(PathBuf, String, bool)> {
     if let Some(p) = pattern {
-        // Path argument provided
-        let target_path = current_dir.join(&p);
+        // Path argument provided - handle "." and ".." specially
+        let target_path = if p == "." {
+            current_dir.to_path_buf()
+        } else if p == ".." {
+            current_dir.parent()
+                .ok_or_else(|| anyhow::anyhow!("Cannot go above root"))?
+                .to_path_buf()
+        } else {
+            current_dir.join(&p)
+        };
+        
         if !target_path.exists() {
             bail!("Path does not exist: {}", target_path.display());
         }
 
-        // Canonicalize to resolve ".", "..", and symlinks
-        let canonical_path = target_path
+        // Canonicalize for validation only - check if target is within repository bounds
+        let canonical_target = target_path
             .canonicalize()
             .context("Failed to canonicalize path")?;
+        let canonical_repo = repo_root
+            .canonicalize()
+            .context("Failed to canonicalize repo root")?;
+        
+        if !canonical_target.starts_with(&canonical_repo) {
+            bail!("Path is outside repository");
+        }
 
-        let rel_path = canonical_path
-            .strip_prefix(&repo_root.canonicalize()?)
+        // Compute the relative path using the logical paths
+        // This preserves the user's view of the filesystem through symlinks
+        let rel_path = target_path
+            .strip_prefix(repo_root)
             .context("Path is outside repository")?;
         let rel_path_str = rel_path.to_string_lossy().to_string();
 
-        // If it's a file, always non-recursive; if directory, use recursive flag
-        let is_recursive = canonical_path.is_dir() && recursive;
-        Ok((canonical_path, rel_path_str, is_recursive))
+        // Use the logical path for scanning
+        let is_recursive = target_path.is_dir() && recursive;
+        Ok((target_path, rel_path_str, is_recursive))
     } else if recursive {
         // No path, but -r flag: scan from current directory recursively
         let rel_current = current_dir
@@ -150,6 +203,17 @@ fn scan_and_display_status(
 ) -> Result<(std::collections::HashSet<String>, bool)> {
     let mut fs_files = std::collections::HashSet::new();
     let mut has_changes = false;
+
+    // Canonicalize repo_root for consistent path comparisons with WalkDir
+    // WalkDir may return canonical paths from the OS  
+    let canonical_repo = repo_root.canonicalize()
+        .context("Failed to canonicalize repo root")?;
+
+    // Also get the logical and canonical scan_dir to map paths back to logical form
+    let canonical_scan = scan_dir.canonicalize()
+        .context("Failed to canonicalize scan directory")?;
+    let logical_scan_rel = scan_dir.strip_prefix(repo_root)
+        .context("Scan dir is outside repository")?;
 
     if scan_dir.is_file() {
         // Single file
@@ -196,14 +260,22 @@ fn scan_and_display_status(
         
         let walker = base_walker.into_iter().filter_entry(|e| {
             // Skip .oci directory and ignored directories
-            if let Ok(rel) = e.path().strip_prefix(repo_root) {
+            // Use canonical_repo for path stripping since WalkDir returns canonical paths
+            if let Ok(canonical_rel) = e.path().strip_prefix(&canonical_repo) {
+                // Map canonical path back to logical path by replacing canonical_scan prefix with logical
+                let rel = if let Ok(rel_from_scan) = e.path().strip_prefix(&canonical_scan) {
+                    logical_scan_rel.join(rel_from_scan)
+                } else {
+                    canonical_rel.to_path_buf()
+                };
+                
                 let rel_str = rel.to_string_lossy();
                 if rel_str.starts_with(".oci") {
                     return false;
                 }
                 
                 // Skip directories that match ignore patterns
-                if e.file_type().is_dir() && ignore::should_ignore(rel, patterns) {
+                if e.file_type().is_dir() && ignore::should_ignore(&rel, patterns) {
                     if verbose {
                         eprintln!("Skipping ignored directory: {}", rel.display());
                     }
@@ -226,13 +298,21 @@ fn scan_and_display_status(
             };
             
             if entry.file_type().is_file() {
-                let rel_path = entry
+                // Get canonical relative path and map back to logical  
+                let canonical_rel = entry
                     .path()
-                    .strip_prefix(repo_root)
+                    .strip_prefix(&canonical_repo)
                     .context("Path is outside repository")?;
+                    
+                // Map canonical path back to logical by replacing canonical_scan prefix with logical
+                let rel_path = if let Ok(rel_from_scan) = entry.path().strip_prefix(&canonical_scan) {
+                    logical_scan_rel.join(rel_from_scan)
+                } else {
+                    canonical_rel.to_path_buf()
+                };
                 let rel_path_str = rel_path.to_string_lossy().to_string();
 
-                if ignore::should_ignore(rel_path, patterns) {
+                if ignore::should_ignore(&rel_path, patterns) {
                     if verbose {
                         let display_path = display_ctx.make_relative(&rel_path_str)?;
                         let display_entry = display_ctx.create_status_entry(entry.path(), display_path)?;
@@ -290,7 +370,9 @@ fn display_deleted_files(
 pub fn status(pattern: Option<String>, recursive: bool, verbose: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     check_version(&repo_root)?;
-    let current_dir = env::current_dir()?;
+    
+    let current_dir = get_logical_current_dir()?;
+    
     let index = Index::load(&repo_root)?;
     let patterns = ignore::load_patterns(&repo_root)?;
 
@@ -464,17 +546,35 @@ fn update_directory(
 ) -> Result<()> {
     let mut fs_files = std::collections::HashSet::new();
 
+    // Canonicalize repo_root for consistent path comparisons with WalkDir
+    let canonical_repo = repo_root.canonicalize()
+        .context("Failed to canonicalize repo root")?;
+
+    // Also get the logical and canonical target to map paths back to logical form
+    let canonical_target = target_path.canonicalize()
+        .context("Failed to canonicalize target path")?;
+    let logical_target_rel = target_path.strip_prefix(repo_root)
+        .context("Target path is outside repository")?;
+
     // Walk the directory tree, filtering out ignored directories
     for entry in WalkDir::new(target_path).into_iter().filter_entry(|e| {
         // Skip .oci directory
-        if let Ok(rel) = e.path().strip_prefix(repo_root) {
+        // Use canonical_repo for path stripping since WalkDir returns canonical paths
+        if let Ok(canonical_rel) = e.path().strip_prefix(&canonical_repo) {
+            // Map canonical path back to logical path by replacing canonical_target prefix with logical
+            let rel = if let Ok(rel_from_target) = e.path().strip_prefix(&canonical_target) {
+                logical_target_rel.join(rel_from_target)
+            } else {
+                canonical_rel.to_path_buf()
+            };
+            
             let rel_str = rel.to_string_lossy();
             if rel_str.starts_with(".oci") {
                 return false;
             }
             
             // Skip directories that match ignore patterns (much more efficient!)
-            if e.file_type().is_dir() && ignore::should_ignore(rel, patterns) {
+            if e.file_type().is_dir() && ignore::should_ignore(&rel, patterns) {
                 if verbose {
                     eprintln!("Skipping ignored directory: {}", rel.display());
                 }
@@ -495,13 +595,21 @@ fn update_directory(
         };
 
         if entry.file_type().is_file() {
-            let rel_path = entry
+            // Get canonical relative path and map back to logical
+            let canonical_rel = entry
                 .path()
-                .strip_prefix(repo_root)
+                .strip_prefix(&canonical_repo)
                 .context("Path is outside repository")?;
+                
+            // Map canonical path back to logical by replacing canonical_target prefix with logical
+            let rel_path = if let Ok(rel_from_target) = entry.path().strip_prefix(&canonical_target) {
+                logical_target_rel.join(rel_from_target)
+            } else {
+                canonical_rel.to_path_buf()
+            };
             let rel_path_str = rel_path.to_string_lossy().to_string();
 
-            if ignore::should_ignore(rel_path, patterns) {
+            if ignore::should_ignore(&rel_path, patterns) {
                 // File is ignored
                 if verbose {
                     // Display immediately for streaming output
@@ -603,12 +711,21 @@ fn update_directory(
 pub fn update(pattern: Option<String>, verbose: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     check_version(&repo_root)?;
-    let current_dir = env::current_dir()?;
+    let current_dir = get_logical_current_dir()?;
     let mut index = Index::load(&repo_root)?;
     let patterns = ignore::load_patterns(&repo_root)?;
 
     let target_path = if let Some(p) = pattern {
-        current_dir.join(p)
+        // Handle "." and ".." specially
+        if p == "." {
+            current_dir.clone()
+        } else if p == ".." {
+            current_dir.parent()
+                .ok_or_else(|| anyhow::anyhow!("Cannot go above root"))?
+                .to_path_buf()
+        } else {
+            current_dir.join(p)
+        }
     } else {
         repo_root.clone()
     };
@@ -617,11 +734,19 @@ pub fn update(pattern: Option<String>, verbose: bool) -> Result<()> {
         bail!("Path does not exist: {}", target_path.display());
     }
 
-    // Canonicalize to resolve ".", "..", and symlinks
-    let target_path = target_path
+    // Canonicalize only for validation - check if path is within repository
+    let canonical_target = target_path
         .canonicalize()
         .context("Failed to canonicalize path")?;
+    let canonical_repo = repo_root
+        .canonicalize()
+        .context("Failed to canonicalize repo root")?;
+    
+    if !canonical_target.starts_with(&canonical_repo) {
+        bail!("Path is outside repository");
+    }
 
+    // Use the logical path to preserve user's view through symlinks
     let display_ctx = DisplayContext::new(repo_root.clone(), current_dir);
     let mut stats = UpdateStats::new();
 
@@ -657,7 +782,7 @@ pub fn update(pattern: Option<String>, verbose: bool) -> Result<()> {
 pub fn ls(recursive: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     check_version(&repo_root)?;
-    let current_dir = env::current_dir()?;
+    let current_dir = get_logical_current_dir()?;
     let index = Index::load(&repo_root)?;
 
     let rel_current = current_dir
@@ -713,7 +838,7 @@ pub fn grep(hash: &str) -> Result<()> {
 pub fn duplicates() -> Result<()> {
     let repo_root = find_repo_root()?;
     check_version(&repo_root)?;
-    let current_dir = env::current_dir()?;
+    let current_dir = get_logical_current_dir()?;
     let index = Index::load(&repo_root)?;
 
     // Get all files from the repository recursively
@@ -996,18 +1121,24 @@ fn execute_prune(
     files_to_prune: Vec<(String, String, bool)>,
     local_index: &mut Index,
     repo_root: &Path,
-) -> Result<(usize, usize, usize)> {
+) -> Result<(usize, usize, usize, u64)> {
     let pruneyard_path = repo_root.join(OCI_DIR).join("pruneyard");
     fs::create_dir_all(&pruneyard_path).context("Failed to create pruneyard directory")?;
 
     let mut pruned_count = 0;
     let mut duplicate_count = 0;
     let mut ignored_count = 0;
+    let mut total_bytes = 0u64;
 
     // Move files to pruneyard
     for (path, reason, in_index) in files_to_prune {
         let source_file = repo_root.join(&path);
         let dest_file = pruneyard_path.join(&path);
+
+        // Get file size before moving
+        if let Ok(size) = file_utils::get_file_size(&source_file) {
+            total_bytes += size;
+        }
 
         // Create parent directories in pruneyard
         if let Some(parent) = dest_file.parent() {
@@ -1037,7 +1168,7 @@ fn execute_prune(
         }
     }
 
-    Ok((pruned_count, duplicate_count, ignored_count))
+    Ok((pruned_count, duplicate_count, ignored_count, total_bytes))
 }
 
 /// Prune files that exist in another index
@@ -1085,7 +1216,7 @@ pub fn prune(
     let source_abs_path = if Path::new(&source_path).is_absolute() {
         PathBuf::from(&source_path)
     } else {
-        env::current_dir()?.join(&source_path)
+        get_logical_current_dir()?.join(&source_path)
     };
 
     if !source_abs_path.exists() {
@@ -1145,7 +1276,7 @@ pub fn prune(
     }
 
     // Execute prune
-    let (pruned_count, duplicate_count, ignored_count) =
+    let (pruned_count, duplicate_count, ignored_count, total_bytes) =
         execute_prune(files_to_prune, &mut local_index, &repo_root)?;
 
     local_index.save(&repo_root)?;
@@ -1155,8 +1286,8 @@ pub fn prune(
 
     if pruned_count > 0 {
         println!(
-            "Pruned {} file(s) to .oci/pruneyard/ ({} duplicates, {} ignored)",
-            pruned_count, duplicate_count, ignored_count
+            "Pruned {} file(s) to .oci/pruneyard/ ({} duplicates, {} ignored, {})",
+            pruned_count, duplicate_count, ignored_count, format_bytes(total_bytes)
         );
     } else {
         println!("Pruned 0 file(s)");
@@ -1170,6 +1301,35 @@ pub fn prune(
         );
     }
 
+    Ok(())
+}
+
+/// Reset the index (clear all entries)
+pub fn reset(force: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
+    
+    // Ask for confirmation unless --force is used
+    if !force {
+        println!("This will remove all entries from the index.");
+        print!("Are you sure you want to continue? (y/N): ");
+        std::io::Write::flush(&mut std::io::stdout())?;
+        
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        
+        let confirmed = input.trim().eq_ignore_ascii_case("y") || input.trim().eq_ignore_ascii_case("yes");
+        
+        if !confirmed {
+            println!("Reset cancelled");
+            return Ok(());
+        }
+    }
+    
+    let mut index = Index::load(&repo_root)?;
+    index.clear()?;
+    
+    println!("Reset index (removed all entries)");
     Ok(())
 }
 
@@ -1353,11 +1513,17 @@ fn prune_local_ignored_files(repo_root: &Path) -> Result<()> {
         .context("Failed to create pruneyard directory")?;
     
     let mut pruned_count = 0;
+    let mut total_bytes = 0u64;
     
     // Move files to pruneyard
     for (path, in_index) in files_to_prune {
         let source_file = repo_root.join(&path);
         let dest_file = pruneyard_path.join(&path);
+        
+        // Get file size before moving
+        if let Ok(size) = file_utils::get_file_size(&source_file) {
+            total_bytes += size;
+        }
         
         // Create parent directories in pruneyard
         if let Some(parent) = dest_file.parent() {
@@ -1387,7 +1553,7 @@ fn prune_local_ignored_files(repo_root: &Path) -> Result<()> {
     let empty_dirs_removed = dir_utils::remove_all_empty_dirs(repo_root)?;
     
     if pruned_count > 0 {
-        println!("Pruned {} ignored file(s) to .oci/pruneyard/", pruned_count);
+        println!("Pruned {} ignored file(s) to .oci/pruneyard/ ({})", pruned_count, format_bytes(total_bytes));
     } else {
         println!("Pruned 0 file(s)");
     }

@@ -108,6 +108,11 @@ fn matches_filename(glob_pattern: &Pattern, path: &Path) -> bool {
 fn matches_directory_pattern(pattern: &str, path: &Path, path_str: &str) -> bool {
     let dir_pattern = pattern.trim_end_matches('/');
 
+    // Check if the path itself is exactly the directory (for filter_entry on the dir itself)
+    if path_str == dir_pattern {
+        return true;
+    }
+
     // Try matching with glob for patterns like *.photoslibrary/resources/derivatives
     if let Ok(glob) = Pattern::new(&format!("{}/**", dir_pattern)) {
         if glob.matches(path_str) {
@@ -225,5 +230,21 @@ mod tests {
         assert!(!should_ignore(Path::new("build/output.js"), &[]));
         assert!(!should_ignore(Path::new("file.pyc"), &[]));
         assert!(!should_ignore(Path::new(".DS_Store"), &[]));
+    }
+    
+    #[test]
+    fn test_ignore_directory_with_spaces() {
+        let patterns = vec!["Library/Application Support/Google/DriveFS/".to_string()];
+        
+        // The directory itself should be ignored
+        assert!(should_ignore(Path::new("Library/Application Support/Google/DriveFS"), &patterns));
+        
+        // Files inside the directory should be ignored
+        assert!(should_ignore(Path::new("Library/Application Support/Google/DriveFS/file.txt"), &patterns));
+        assert!(should_ignore(Path::new("Library/Application Support/Google/DriveFS/subdir/file.txt"), &patterns));
+        
+        // Files outside the directory should not be ignored
+        assert!(!should_ignore(Path::new("Library/Application Support/Google/file.txt"), &patterns));
+        assert!(!should_ignore(Path::new("Library/Application Support/file.txt"), &patterns));
     }
 }

@@ -44,12 +44,20 @@ TODO - It looks like update and status could be abstracted better to both use a 
 
 3. **Change Detection**: Files are considered unchanged if both size and modified time match. This avoids unnecessary hashing for both status checks and updates. The `update` command only recomputes hashes for files that are new or have changed (different size or modified time), making it efficient for incremental updates. Files that haven't changed are skipped and counted separately in the output.
 
-4. **Path Handling**: All paths in the index are stored relative to the repository root for portability. Display paths are made relative to the current working directory for user convenience. When processing user-provided path arguments (especially "." and ".."), paths are canonicalized using `canonicalize()` to resolve:
-   - Relative path components like "." and ".."
-   - Symlinks (e.g., `/tmp` → `/private/tmp` on macOS)
-   - Ensuring consistent path comparison between filesystem scans and index lookups
+4. **Path Handling and Symlinks**: All paths in the index are stored relative to the repository root for portability. Display paths are made relative to the current working directory for user convenience. 
    
-   Without canonicalization, paths like "Google Drive/Papers/./file.txt" won't match "Google Drive/Papers/file.txt" in HashSet lookups, causing files to incorrectly appear as both added and deleted.
+   **Symlink Preservation**: The tool preserves the user's view of the filesystem through symlinks. When a user initializes oci in `~/Google Drive` (which may be a symlink to `~/Library/CloudStorage/GoogleDrive-...`), paths are stored and displayed using the logical path structure (`Google Drive/...`), not the resolved physical path. This is critical because:
+   - Users expect to see paths matching their working directory structure
+   - Ignore patterns should work on the user's logical view (not hidden symlink targets)
+   - The index should be self-contained within the user's working directory
+   
+   **Implementation Details**: 
+   - The tool uses the `PWD` environment variable (which preserves symlinks) instead of Rust's `env::current_dir()` (which resolves symlinks) to get the logical current directory
+   - For validation, paths are still canonicalized to check if they're within repository bounds
+   - When WalkDir traverses the filesystem, it may return canonical paths from the OS. These are mapped back to logical paths by detecting the canonical-to-logical prefix difference and replacing it
+   - Special handling for "." and ".." resolves them to current/parent directory without unnecessary canonicalization
+   
+   This approach ensures that users working through symlinks see consistent, logical paths while maintaining correctness for path validation and filesystem operations.
 
 5. **Ignore Patterns**: Uses the `glob` crate for pattern matching, supporting wildcards similar to `.gitignore`. During initialization (`oci init`), an `ignore` file is created with conservative default patterns for common intermediate/derived files. These defaults are written to the file (not hardcoded in the application), making them transparent and editable by users. The patterns favor specificity over breadth to avoid false positives:
    - Package manager dependencies and caches (e.g., `node_modules/`, `.npm/`)
