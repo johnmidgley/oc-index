@@ -187,12 +187,31 @@ fn scan_and_display_status(
             }
         }
     } else {
-        // Directory - walk and display as we go
-        let walker = if is_recursive {
-            WalkDir::new(scan_dir).into_iter()
+        // Directory - walk and display as we go, filtering out ignored directories
+        let base_walker = if is_recursive {
+            WalkDir::new(scan_dir)
         } else {
-            WalkDir::new(scan_dir).max_depth(1).into_iter()
+            WalkDir::new(scan_dir).max_depth(1)
         };
+        
+        let walker = base_walker.into_iter().filter_entry(|e| {
+            // Skip .oci directory and ignored directories
+            if let Ok(rel) = e.path().strip_prefix(repo_root) {
+                let rel_str = rel.to_string_lossy();
+                if rel_str.starts_with(".oci") {
+                    return false;
+                }
+                
+                // Skip directories that match ignore patterns
+                if e.file_type().is_dir() && ignore::should_ignore(rel, patterns) {
+                    if verbose {
+                        eprintln!("Skipping ignored directory: {}", rel.display());
+                    }
+                    return false;
+                }
+            }
+            true
+        });
 
         for entry in walker {
             // Handle permission errors gracefully - skip and continue
@@ -367,9 +386,28 @@ fn update_single_file(
         }
     } else {
         let is_new = index.get(&rel_path_str)?.is_none();
+        let display_path = display_ctx.make_relative(&rel_path_str)?;
 
-        if should_update_file(index, target_path, &rel_path_str)? {
-            let display_path = display_ctx.make_relative(&rel_path_str)?;
+        // Check if file should be updated, but handle permission errors gracefully
+        let should_update = match should_update_file(index, target_path, &rel_path_str) {
+            Ok(should) => should,
+            Err(e) => {
+                // Check if it's a permission error by examining the full error chain
+                let is_permission_error = e.chain().any(|cause| {
+                    let msg = cause.to_string();
+                    msg.contains("Operation not permitted") || msg.contains("Permission denied")
+                });
+                
+                if is_permission_error {
+                    eprintln!("Warning: Skipping file (permission denied): {}", display_path);
+                    return Ok(()); // Skip this file
+                } else {
+                    return Err(e);
+                }
+            }
+        };
+
+        if should_update {
             let marker = if is_new {
                 StatusMarker::Added
             } else {
@@ -377,13 +415,30 @@ fn update_single_file(
             };
             marker.display(&display_path);
 
-            let entry = file_utils::create_file_entry(target_path, rel_path_str)?;
-            index.upsert(entry)?;
-
-            if is_new {
-                stats.added_count += 1;
-            } else {
-                stats.updated_count += 1;
+            // Try to create file entry, but handle permission errors gracefully
+            match file_utils::create_file_entry(target_path, rel_path_str) {
+                Ok(entry) => {
+                    index.upsert(entry)?;
+                    if is_new {
+                        stats.added_count += 1;
+                    } else {
+                        stats.updated_count += 1;
+                    }
+                }
+                Err(e) => {
+                    // Check if it's a permission error by examining the full error chain
+                    let is_permission_error = e.chain().any(|cause| {
+                        let msg = cause.to_string();
+                        msg.contains("Operation not permitted") || msg.contains("Permission denied")
+                    });
+                    
+                    if is_permission_error {
+                        eprintln!("Warning: Skipping file (permission denied): {}", display_path);
+                    } else {
+                        // Other errors should still fail
+                        return Err(e);
+                    }
+                }
             }
         } else {
             stats.skipped_count += 1;
@@ -408,19 +463,25 @@ fn update_directory(
     stats: &mut UpdateStats,
 ) -> Result<()> {
     let mut fs_files = std::collections::HashSet::new();
-    let mut ignored_files: Vec<String> = Vec::new();
 
-    // Walk the directory tree
+    // Walk the directory tree, filtering out ignored directories
     for entry in WalkDir::new(target_path).into_iter().filter_entry(|e| {
-        // In verbose mode, we want to see ignored files too,
-        // so we need to walk into directories even if they match ignore patterns
-        // But we still skip .oci directory
+        // Skip .oci directory
         if let Ok(rel) = e.path().strip_prefix(repo_root) {
             let rel_str = rel.to_string_lossy();
-            !rel_str.starts_with(".oci")
-        } else {
-            true
+            if rel_str.starts_with(".oci") {
+                return false;
+            }
+            
+            // Skip directories that match ignore patterns (much more efficient!)
+            if e.file_type().is_dir() && ignore::should_ignore(rel, patterns) {
+                if verbose {
+                    eprintln!("Skipping ignored directory: {}", rel.display());
+                }
+                return false;
+            }
         }
+        true
     }) {
         // Handle permission errors gracefully - skip and continue
         let entry = match entry {
@@ -441,16 +502,38 @@ fn update_directory(
             let rel_path_str = rel_path.to_string_lossy().to_string();
 
             if ignore::should_ignore(rel_path, patterns) {
-                // File is ignored - only collect if verbose
+                // File is ignored
                 if verbose {
-                    ignored_files.push(rel_path_str);
+                    // Display immediately for streaming output
+                    let display_path = display_ctx.make_relative(&rel_path_str)?;
+                    StatusMarker::Ignored.display(&display_path);
                 }
             } else {
                 fs_files.insert(rel_path_str.clone());
 
                 let is_new = index.get(&rel_path_str)?.is_none();
 
-                if should_update_file(index, entry.path(), &rel_path_str)? {
+                // Check if file should be updated, but handle permission errors gracefully
+                let should_update = match should_update_file(index, entry.path(), &rel_path_str) {
+                    Ok(should) => should,
+                    Err(e) => {
+                        // Check if it's a permission error by examining the full error chain
+                        let is_permission_error = e.chain().any(|cause| {
+                            let msg = cause.to_string();
+                            msg.contains("Operation not permitted") || msg.contains("Permission denied")
+                        });
+                        
+                        if is_permission_error {
+                            let display_path = display_ctx.make_relative(&rel_path_str)?;
+                            eprintln!("Warning: Skipping file (permission denied): {}", display_path);
+                            continue; // Skip this file and move to the next
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                };
+
+                if should_update {
                     let display_path = display_ctx.make_relative(&rel_path_str)?;
                     let marker = if is_new {
                         StatusMarker::Added
@@ -459,13 +542,30 @@ fn update_directory(
                     };
                     marker.display(&display_path);
 
-                    let file_entry = file_utils::create_file_entry(entry.path(), rel_path_str)?;
-                    index.upsert(file_entry)?;
-
-                    if is_new {
-                        stats.added_count += 1;
-                    } else {
-                        stats.updated_count += 1;
+                    // Try to create file entry, but handle permission errors gracefully
+                    match file_utils::create_file_entry(entry.path(), rel_path_str.clone()) {
+                        Ok(file_entry) => {
+                            index.upsert(file_entry)?;
+                            if is_new {
+                                stats.added_count += 1;
+                            } else {
+                                stats.updated_count += 1;
+                            }
+                        }
+                        Err(e) => {
+                            // Check if it's a permission error by examining the full error chain
+                            let is_permission_error = e.chain().any(|cause| {
+                                let msg = cause.to_string();
+                                msg.contains("Operation not permitted") || msg.contains("Permission denied")
+                            });
+                            
+                            if is_permission_error {
+                                eprintln!("Warning: Skipping file (permission denied): {}", display_path);
+                            } else {
+                                // Other errors should still fail
+                                return Err(e);
+                            }
+                        }
                     }
                 } else {
                     stats.skipped_count += 1;
@@ -493,14 +593,6 @@ fn update_directory(
             StatusMarker::Deleted.display(&display_path);
             index.remove(&indexed_entry.path)?;
             stats.removed_count += 1;
-        }
-    }
-
-    // Display ignored files if verbose
-    if verbose {
-        for rel_path_str in ignored_files {
-            let display_path = display_ctx.make_relative(&rel_path_str)?;
-            StatusMarker::Ignored.display(&display_path);
         }
     }
 
