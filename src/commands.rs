@@ -1616,3 +1616,35 @@ fn has_pending_changes(repo_root: &Path) -> Result<bool> {
     Ok(false)
 }
 
+/// List all files sorted by size in descending order (largest first)
+pub fn hogs() -> Result<()> {
+    let repo_root = find_repo_root()?;
+    check_version(&repo_root)?;
+    let current_dir = get_logical_current_dir()?;
+    let index = Index::load(&repo_root)?;
+    
+    // Get all files from the repository
+    let mut entries: Vec<_> = index.get_dir_files_recursive("")?;
+    
+    if entries.is_empty() {
+        println!("No files in index");
+        return Ok(());
+    }
+    
+    // Sort by size in descending order (largest first)
+    entries.sort_by(|a, b| b.num_bytes.cmp(&a.num_bytes));
+    
+    let display_ctx = DisplayContext::new(repo_root, current_dir);
+    for entry in entries {
+        let display_path = display_ctx.make_relative(&entry.path)?;
+        let human_size = format_bytes(entry.num_bytes);
+        println!("{:>10} {:>15} {} {}", 
+            human_size,
+            entry.modified,
+            entry.sha256,
+            display_path
+        );
+    }
+    
+    Ok(())
+}

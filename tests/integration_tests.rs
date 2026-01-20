@@ -1066,3 +1066,42 @@ fn test_prune_ignored_flag_with_indexed_ignored_files() {
     // Verify important.txt still exists
     assert!(local_dir.path().join("important.txt").exists());
 }
+
+#[test]
+fn test_hogs_empty_index() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    let (stdout, _, exit_code) = run_oci(&["hogs"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("No files in index"));
+}
+
+#[test]
+fn test_hogs_sorts_by_size() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    
+    // Create files of different sizes
+    fs::write(test_dir.path().join("small.txt"), "x").unwrap(); // 1 byte
+    fs::write(test_dir.path().join("medium.txt"), "x".repeat(100)).unwrap(); // 100 bytes
+    fs::write(test_dir.path().join("large.txt"), "x".repeat(1000)).unwrap(); // 1000 bytes
+    
+    run_oci(&["update"], test_dir.path());
+    
+    let (stdout, _, exit_code) = run_oci(&["hogs"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    
+    // Verify all files are listed
+    assert!(stdout.contains("small.txt"));
+    assert!(stdout.contains("medium.txt"));
+    assert!(stdout.contains("large.txt"));
+    
+    // Verify they appear in size order (largest first)
+    let large_pos = stdout.find("large.txt").unwrap();
+    let medium_pos = stdout.find("medium.txt").unwrap();
+    let small_pos = stdout.find("small.txt").unwrap();
+    
+    assert!(large_pos < medium_pos, "large.txt should appear before medium.txt");
+    assert!(medium_pos < small_pos, "medium.txt should appear before small.txt");
+}

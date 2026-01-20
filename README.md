@@ -31,6 +31,9 @@ oci duplicates
 # Show index statistics
 oci stats
 
+# List all files sorted by size (largest first)
+oci hogs
+
 # Ignore patterns
 oci ignore "*.log"
 
@@ -381,6 +384,28 @@ Index Statistics:
 ```
 
 This command is useful for getting a quick overview of your indexed content and identifying potential space savings from duplicate files.
+
+## hogs
+
+To display all files sorted by size in descending order (largest files first), call:
+
+```
+oci hogs
+```
+
+This command lists every file in the index, sorted from largest to smallest. This is useful for identifying the largest files in your repository and understanding what's consuming the most space.
+
+File sizes are displayed in a human-readable format (bytes, KB, MB, or GB as appropriate).
+
+Example output:
+```
+  10.00 MB 1609459200000 abc123... videos/movie.mp4
+   5.00 MB 1609459200000 def456... archive.zip
+   1.00 MB 1609459200000 ghi789... document.pdf
+ 500.00 KB 1609459200000 jkl012... image.jpg
+```
+
+The output format is: `size modified sha256 path`, with files displayed in order from largest to smallest.
 
 ## prune 
 

@@ -111,6 +111,9 @@ enum Commands {
     
     /// Show index statistics
     Stats,
+    
+    /// List all files sorted by size (largest first)
+    Hogs,
 }
 
 fn main() -> Result<()> {
@@ -128,5 +131,6 @@ fn main() -> Result<()> {
         Commands::Reset { f } => commands::reset(f),
         Commands::Deinit { f } => commands::deinit(f),
         Commands::Stats => commands::stats(),
+        Commands::Hogs => commands::hogs(),
     }
 }
