@@ -268,9 +268,9 @@ fn scan_and_display_status(
                 } else {
                     canonical_rel.to_path_buf()
                 };
-                
+
                 let rel_str = rel.to_string_lossy();
-                if rel_str.starts_with(".oci") {
+                if rel_str == ".oci" || rel_str.starts_with(".oci/") {
                     return false;
                 }
                 
@@ -567,9 +567,9 @@ fn update_directory(
             } else {
                 canonical_rel.to_path_buf()
             };
-            
+
             let rel_str = rel.to_string_lossy();
-            if rel_str.starts_with(".oci") {
+            if rel_str == ".oci" || rel_str.starts_with(".oci/") {
                 return false;
             }
             
@@ -922,6 +922,7 @@ fn prune_restore(repo_root: &Path) -> Result<()> {
 
     let mut index = Index::load(repo_root)?;
     let mut restored_count = 0;
+    let mut conflict_count = 0;
 
     // Walk through pruneyard and restore files
     for entry in WalkDir::new(&pruneyard_path) {
@@ -933,6 +934,17 @@ fn prune_restore(repo_root: &Path) -> Result<()> {
                 .strip_prefix(&pruneyard_path)
                 .context("Failed to get relative path from pruneyard")?;
             let original_path = repo_root.join(rel_from_pruneyard);
+
+            // Refuse to overwrite a file that may have been created since pruning.
+            // The pruned copy is left in the pruneyard so the user can resolve it.
+            if original_path.exists() {
+                eprintln!(
+                    "Skipping (destination exists): {} — left in .oci/pruneyard/",
+                    rel_from_pruneyard.display()
+                );
+                conflict_count += 1;
+                continue;
+            }
 
             // Create parent directories if needed
             if let Some(parent) = original_path.parent() {
@@ -956,8 +968,8 @@ fn prune_restore(repo_root: &Path) -> Result<()> {
         }
     }
 
-    // Remove empty pruneyard directory
-    if restored_count > 0 {
+    // Only remove the pruneyard if everything was restored cleanly.
+    if restored_count > 0 && conflict_count == 0 {
         fs::remove_dir_all(&pruneyard_path)
             .context("Failed to remove pruneyard directory")?;
     }
@@ -965,6 +977,12 @@ fn prune_restore(repo_root: &Path) -> Result<()> {
     index.save(repo_root)?;
 
     println!("Restored {} file(s) from pruneyard", restored_count);
+    if conflict_count > 0 {
+        println!(
+            "Skipped {} file(s) due to existing destination",
+            conflict_count
+        );
+    }
     Ok(())
 }
 
@@ -1066,7 +1084,7 @@ fn find_files_to_prune(
             // Don't walk into .oci directory
             if let Ok(rel) = e.path().strip_prefix(repo_root) {
                 let rel_str = rel.to_string_lossy();
-                !rel_str.starts_with(".oci")
+                !(rel_str == ".oci" || rel_str.starts_with(".oci/"))
             } else {
                 true
             }
@@ -1466,7 +1484,7 @@ fn prune_local_ignored_files(repo_root: &Path) -> Result<()> {
             // Don't walk into .oci directory
             if let Ok(rel) = e.path().strip_prefix(repo_root) {
                 let rel_str = rel.to_string_lossy();
-                !rel_str.starts_with(".oci")
+                !(rel_str == ".oci" || rel_str.starts_with(".oci/"))
             } else {
                 true
             }

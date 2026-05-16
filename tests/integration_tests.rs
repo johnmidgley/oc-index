@@ -1068,6 +1068,85 @@ fn test_prune_ignored_flag_with_indexed_ignored_files() {
 }
 
 #[test]
+fn test_prune_restore_skips_existing_destination() {
+    // Regression: prune --restore must not silently overwrite a file the user
+    // has placed at the original location since pruning. The pruned copy must
+    // remain in the pruneyard so the user can resolve the conflict.
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+
+    // Create matching file in both repos and prune the local copy
+    fs::write(source_dir.path().join("common.txt"), "shared").unwrap();
+    fs::write(local_dir.path().join("common.txt"), "shared").unwrap();
+    run_oci(&["update"], source_dir.path());
+    run_oci(&["update"], local_dir.path());
+
+    let source_path = source_dir.path().to_str().unwrap();
+    run_oci(&["prune", source_path], local_dir.path());
+
+    // After prune: file is in pruneyard, not on disk
+    assert!(!local_dir.path().join("common.txt").exists());
+    assert!(local_dir.path().join(".oci/pruneyard/common.txt").exists());
+
+    // User creates a NEW file at the original location
+    fs::write(local_dir.path().join("common.txt"), "user's new content").unwrap();
+
+    // Restore must NOT overwrite the user's file
+    let (stdout, stderr, exit_code) = run_oci(&["prune", "--restore"], local_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(
+        stderr.contains("Skipping") && stderr.contains("common.txt"),
+        "Expected skip warning on stderr, got:\n{}",
+        stderr
+    );
+    assert!(stdout.contains("Restored 0 file(s)"));
+    assert!(stdout.contains("Skipped 1 file(s)"));
+
+    // The user's file is intact
+    let content = fs::read_to_string(local_dir.path().join("common.txt")).unwrap();
+    assert_eq!(content, "user's new content");
+
+    // The pruned copy stays in the pruneyard for manual resolution
+    assert!(local_dir.path().join(".oci/pruneyard/common.txt").exists());
+    let pruned_content =
+        fs::read_to_string(local_dir.path().join(".oci/pruneyard/common.txt")).unwrap();
+    assert_eq!(pruned_content, "shared");
+}
+
+#[test]
+fn test_dot_oci_prefix_does_not_match_unrelated_dotfiles() {
+    // Regression: files/dirs whose name starts with ".oci" (e.g. ".ocirc",
+    // ".oci-backup") must NOT be treated as the .oci index directory and
+    // silently excluded from scans.
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    // File whose name starts with ".oci" but is not the index directory
+    fs::write(test_dir.path().join(".ocirc"), "config").unwrap();
+    // Directory whose name starts with ".oci"
+    fs::create_dir(test_dir.path().join(".oci-backup")).unwrap();
+    fs::write(test_dir.path().join(".oci-backup/data.txt"), "backup").unwrap();
+    // Regular file as a control
+    fs::write(test_dir.path().join("regular.txt"), "regular").unwrap();
+
+    let (stdout, _, exit_code) = run_oci(&["update"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("3 added"), "Expected 3 added, got:\n{}", stdout);
+
+    let (stdout, _, _) = run_oci(&["ls", "-r"], test_dir.path());
+    assert!(stdout.contains(".ocirc"), ".ocirc should be indexed:\n{}", stdout);
+    assert!(
+        stdout.contains(".oci-backup/data.txt"),
+        ".oci-backup/data.txt should be indexed:\n{}",
+        stdout
+    );
+    assert!(stdout.contains("regular.txt"));
+}
+
+#[test]
 fn test_hogs_empty_index() {
     let test_dir = TempDir::new().unwrap();
     run_oci(&["init"], test_dir.path());
