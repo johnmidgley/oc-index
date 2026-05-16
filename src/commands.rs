@@ -77,27 +77,37 @@ fn check_version(repo_root: &Path) -> Result<()> {
 pub fn init() -> Result<()> {
     let current_dir = env::current_dir()
         .context("Failed to get current directory")?;
-    
+
     let oci_dir = current_dir.join(OCI_DIR);
-    
+
     if oci_dir.exists() {
         bail!("Index already exists at {}", oci_dir.display());
     }
-    
+
     fs::create_dir_all(&oci_dir)
         .context("Failed to create .oci directory")?;
-    
-    let index = Index::new()?;
-    index.save(&current_dir)?;
-    
-    // Initialize config with current version
-    let config = Config::new();
-    config.save(&current_dir)?;
-    
-    // Initialize ignore with default patterns
-    ignore::init_ignore_file(&current_dir)?;
-    
+
+    // If any inner step fails, remove the partially-created .oci so the user
+    // can retry without first running `rm -rf .oci`.
+    if let Err(e) = populate_new_index(&current_dir) {
+        let _ = fs::remove_dir_all(&oci_dir);
+        return Err(e);
+    }
+
     println!("Initialized empty oci index in {}", oci_dir.display());
+    Ok(())
+}
+
+/// Populate a freshly-created .oci directory with index, config, and ignore file.
+fn populate_new_index(repo_root: &Path) -> Result<()> {
+    let index = Index::new()?;
+    index.save(repo_root)?;
+
+    let config = Config::new();
+    config.save(repo_root)?;
+
+    ignore::init_ignore_file(repo_root)?;
+
     Ok(())
 }
 

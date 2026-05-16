@@ -15,8 +15,9 @@ Tracking list of bugs and missing tests found during code review. Check items of
   `fs::rename(entry.path(), &original_path)` overwrites the destination on Linux without warning. If the user created a file at the original path after pruning, restore silently destroys it. Check destination existence first.
   Fixed: conflicting destinations are now skipped with a stderr warning and left in `.oci/pruneyard/`. Pruneyard is only removed when restore is complete (zero conflicts). Regression test `test_prune_restore_skips_existing_destination` added.
 
-- [ ] **`init` leaves a half-baked `.oci` on failure** — `src/commands.rs:87-98`
+- [x] **`init` leaves a half-baked `.oci` on failure** — `src/commands.rs:87-98`
   `fs::create_dir_all(&oci_dir)` runs before `Index::new()`, `save()`, `Config::new().save()`, and `init_ignore_file()`. If any of those fail, the empty `.oci` is left behind and the next `init` aborts with "Index already exists", masking the real cause and forcing manual `rm -rf .oci`.
+  Fixed: inner steps moved into `populate_new_index`; on failure the partial `.oci` is removed before the error is returned. No automated regression test — the early `if oci_dir.exists() { bail }` check makes it awkward to set up a half-baked state from an integration test without restructuring further. Verified by inspection.
 
 - [ ] **`ScanResult::ignored_files` is dead** — `src/scanner.rs:15`, `src/scanner.rs:37`
   Declared but never inserted into; always returned empty. `#[allow(dead_code)]` is a hint it was forgotten. Either remove the field or actually populate it — right now it looks live but isn't.
