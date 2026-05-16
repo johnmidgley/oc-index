@@ -47,6 +47,14 @@ fn find_repo_root() -> Result<PathBuf> {
     }
 }
 
+/// Return true if any cause in the error chain looks like a permission denial.
+fn is_permission_denied(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let msg = cause.to_string();
+        msg.contains("Operation not permitted") || msg.contains("Permission denied")
+    })
+}
+
 /// Format bytes in a human-readable format
 fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
@@ -134,9 +142,13 @@ pub fn ignore(pattern: Option<String>) -> Result<()> {
         rel_path.to_string_lossy().to_string()
     };
     
-    ignore::add_pattern(&repo_root, &pattern_to_add)?;
-    println!("Added pattern to ignore: {}", pattern_to_add);
-    
+    let added = ignore::add_pattern(&repo_root, &pattern_to_add)?;
+    if added {
+        println!("Added pattern to ignore: {}", pattern_to_add);
+    } else {
+        println!("Pattern already in ignore: {}", pattern_to_add);
+    }
+
     Ok(())
 }
 
@@ -484,13 +496,7 @@ fn update_single_file(
         let should_update = match should_update_file(index, target_path, &rel_path_str) {
             Ok(should) => should,
             Err(e) => {
-                // Check if it's a permission error by examining the full error chain
-                let is_permission_error = e.chain().any(|cause| {
-                    let msg = cause.to_string();
-                    msg.contains("Operation not permitted") || msg.contains("Permission denied")
-                });
-                
-                if is_permission_error {
+                if is_permission_denied(&e) {
                     eprintln!("Warning: Skipping file (permission denied): {}", display_path);
                     return Ok(()); // Skip this file
                 } else {
@@ -518,13 +524,7 @@ fn update_single_file(
                     }
                 }
                 Err(e) => {
-                    // Check if it's a permission error by examining the full error chain
-                    let is_permission_error = e.chain().any(|cause| {
-                        let msg = cause.to_string();
-                        msg.contains("Operation not permitted") || msg.contains("Permission denied")
-                    });
-                    
-                    if is_permission_error {
+                    if is_permission_denied(&e) {
                         eprintln!("Warning: Skipping file (permission denied): {}", display_path);
                     } else {
                         // Other errors should still fail
@@ -635,13 +635,7 @@ fn update_directory(
                 let should_update = match should_update_file(index, entry.path(), &rel_path_str) {
                     Ok(should) => should,
                     Err(e) => {
-                        // Check if it's a permission error by examining the full error chain
-                        let is_permission_error = e.chain().any(|cause| {
-                            let msg = cause.to_string();
-                            msg.contains("Operation not permitted") || msg.contains("Permission denied")
-                        });
-                        
-                        if is_permission_error {
+                        if is_permission_denied(&e) {
                             let display_path = display_ctx.make_relative(&rel_path_str)?;
                             eprintln!("Warning: Skipping file (permission denied): {}", display_path);
                             continue; // Skip this file and move to the next
@@ -671,13 +665,7 @@ fn update_directory(
                             }
                         }
                         Err(e) => {
-                            // Check if it's a permission error by examining the full error chain
-                            let is_permission_error = e.chain().any(|cause| {
-                                let msg = cause.to_string();
-                                msg.contains("Operation not permitted") || msg.contains("Permission denied")
-                            });
-                            
-                            if is_permission_error {
+                            if is_permission_denied(&e) {
                                 eprintln!("Warning: Skipping file (permission denied): {}", display_path);
                             } else {
                                 // Other errors should still fail
@@ -741,6 +729,27 @@ pub fn update(pattern: Option<String>, verbose: bool) -> Result<()> {
     };
 
     if !target_path.exists() {
+        // The file may have been deleted from disk but still be in the index;
+        // align with the directory path which detects deletions automatically.
+        let rel_str = target_path
+            .strip_prefix(&repo_root)
+            .ok()
+            .map(|p| p.to_string_lossy().to_string());
+
+        if let Some(rel_str) = rel_str {
+            if index.get(&rel_str)?.is_some() {
+                let display_ctx = DisplayContext::new(repo_root.clone(), current_dir);
+                let display_path = display_ctx.make_relative(&rel_str)?;
+                StatusMarker::Deleted.display(&display_path);
+                index.remove(&rel_str)?;
+                index.save(&repo_root)?;
+                let mut stats = UpdateStats::new();
+                stats.removed_count = 1;
+                stats.print_summary();
+                return Ok(());
+            }
+        }
+
         bail!("Path does not exist: {}", target_path.display());
     }
 
@@ -898,9 +907,9 @@ pub fn duplicates() -> Result<()> {
         total_duplicate_files, total_groups
     );
     println!(
-        "Potential space savings: {} bytes ({:.2} MB)\n",
+        "Potential space savings: {} bytes ({})\n",
         wasted_bytes,
-        wasted_bytes as f64 / 1_048_576.0
+        format_bytes(wasted_bytes)
     );
 
     // Display each group
@@ -1063,12 +1072,16 @@ fn find_files_to_prune(
             prune_reason = "duplicate".to_string();
         }
 
-        // Check if file matches source ignore patterns (unless --no-ignore)
+        // Check if file matches source ignore patterns (unless --no-ignore).
+        // Don't overwrite an earlier "duplicate" classification — a file that
+        // is both a duplicate AND ignored should still count as a duplicate.
         if !no_ignore && !source_patterns.is_empty() {
             let path = Path::new(&local_entry.path);
             if ignore::should_ignore(path, source_patterns) {
                 should_prune = true;
-                prune_reason = "ignored".to_string();
+                if prune_reason.is_empty() {
+                    prune_reason = "ignored".to_string();
+                }
             }
         }
 
@@ -1077,7 +1090,9 @@ fn find_files_to_prune(
             let path = Path::new(&local_entry.path);
             if ignore::should_ignore(path, local_patterns) {
                 should_prune = true;
-                prune_reason = "ignored".to_string();
+                if prune_reason.is_empty() {
+                    prune_reason = "ignored".to_string();
+                }
             }
         }
 
@@ -1451,14 +1466,14 @@ pub fn stats() -> Result<()> {
     // Display statistics
     println!("Index Statistics:");
     println!("  Total files: {}", total_files);
-    println!("  Total size: {} bytes ({:.2} MB)", total_size, total_size as f64 / 1_048_576.0);
+    println!("  Total size: {} bytes ({})", total_size, format_bytes(total_size));
     println!("  Unique hashes: {}", unique_hashes);
     println!("  Duplicate files: {}", duplicate_files);
     
     if duplicate_files > 0 {
         let duplicate_groups = hash_map.values().filter(|files| files.len() > 1).count();
         println!("  Duplicate groups: {}", duplicate_groups);
-        println!("  Wasted space: {} bytes ({:.2} MB)", wasted_space, wasted_space as f64 / 1_048_576.0);
+        println!("  Wasted space: {} bytes ({})", wasted_space, format_bytes(wasted_space));
     }
     
     println!("  Storage efficiency: {:.2}%", storage_efficiency);
@@ -1666,13 +1681,31 @@ pub fn hogs() -> Result<()> {
     for entry in entries {
         let display_path = display_ctx.make_relative(&entry.path)?;
         let human_size = format_bytes(entry.num_bytes);
-        println!("{:>10} {:>15} {} {}", 
+        println!("{:>10} {:>15} {} {}",
             human_size,
             entry.modified,
             entry.sha256,
             display_path
         );
     }
-    
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_bytes_picks_correct_unit() {
+        // Boundary checks across each unit
+        assert_eq!(format_bytes(0), "0 bytes");
+        assert_eq!(format_bytes(1023), "1023 bytes");
+        assert_eq!(format_bytes(1024), "1.00 KB");
+        assert_eq!(format_bytes(1024 * 1024 - 1), "1024.00 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.00 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.00 GB");
+        // 10 GB: regression for the old MB-only stats output
+        assert_eq!(format_bytes(10 * 1024 * 1024 * 1024), "10.00 GB");
+    }
 }

@@ -55,10 +55,10 @@ pub fn remove_all_empty_dirs(repo_root: &Path) -> Result<usize> {
         for entry in WalkDir::new(repo_root).min_depth(1).contents_first(true) {
             let entry = entry?;
 
-            // Skip .oci directory
+            // Skip .oci directory (but not unrelated names like .ocirc)
             if let Ok(rel) = entry.path().strip_prefix(repo_root) {
                 let rel_str = rel.to_string_lossy();
-                if rel_str.starts_with(".oci") {
+                if rel_str == ".oci" || rel_str.starts_with(".oci/") {
                     continue;
                 }
             }
@@ -97,4 +97,82 @@ pub fn count_files_in_dir(dir: &Path) -> Result<usize> {
     }
 
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_remove_empty_parent_dirs_walks_up_until_nonempty() {
+        let root = TempDir::new().unwrap();
+        let nested = root.path().join("a/b/c");
+        fs::create_dir_all(&nested).unwrap();
+        let file_path = nested.join("doomed.txt");
+        fs::write(&file_path, "x").unwrap();
+        fs::remove_file(&file_path).unwrap();
+
+        remove_empty_parent_dirs(&file_path, root.path()).unwrap();
+
+        // a, b, c are all empty after removal — all should be cleaned up
+        assert!(!root.path().join("a/b/c").exists());
+        assert!(!root.path().join("a/b").exists());
+        assert!(!root.path().join("a").exists());
+        // Root itself is preserved
+        assert!(root.path().exists());
+    }
+
+    #[test]
+    fn test_remove_empty_parent_dirs_stops_at_nonempty() {
+        let root = TempDir::new().unwrap();
+        let nested = root.path().join("a/b");
+        fs::create_dir_all(&nested).unwrap();
+        // Sibling keeps "a" non-empty
+        fs::write(root.path().join("a/sibling.txt"), "x").unwrap();
+
+        let file_path = nested.join("doomed.txt");
+        fs::write(&file_path, "x").unwrap();
+        fs::remove_file(&file_path).unwrap();
+
+        remove_empty_parent_dirs(&file_path, root.path()).unwrap();
+
+        // b was empty and removed; a stays because of sibling.txt
+        assert!(!root.path().join("a/b").exists());
+        assert!(root.path().join("a/sibling.txt").exists());
+    }
+
+    #[test]
+    fn test_remove_all_empty_dirs_preserves_oci_lookalikes() {
+        // Regression: the .oci skip must not match unrelated dotfile names.
+        let root = TempDir::new().unwrap();
+        // Real .oci/ — should be skipped (not removed even if empty)
+        fs::create_dir(root.path().join(".oci")).unwrap();
+        // .oci-backup/ — different directory, must NOT be skipped
+        fs::create_dir(root.path().join(".oci-backup")).unwrap();
+        // Some other empty dir
+        fs::create_dir(root.path().join("empty-data")).unwrap();
+
+        let count = remove_all_empty_dirs(root.path()).unwrap();
+
+        assert!(root.path().join(".oci").exists(), ".oci must be preserved");
+        assert!(
+            !root.path().join(".oci-backup").exists(),
+            ".oci-backup should have been removed"
+        );
+        assert!(!root.path().join("empty-data").exists());
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_count_files_in_dir() {
+        let root = TempDir::new().unwrap();
+        fs::write(root.path().join("a.txt"), "x").unwrap();
+        fs::create_dir(root.path().join("sub")).unwrap();
+        fs::write(root.path().join("sub/b.txt"), "y").unwrap();
+        fs::write(root.path().join("sub/c.txt"), "z").unwrap();
+
+        assert_eq!(count_files_in_dir(root.path()).unwrap(), 3);
+    }
 }

@@ -106,10 +106,23 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(b"hello")?;
         temp_file.flush()?;
-        
+
         let size = get_file_size(temp_file.path())?;
         assert_eq!(size, 5);
-        
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_compute_sha256_empty_file() -> Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        // No write — file is zero bytes
+        let hash = compute_sha256(temp_file.path())?;
+        // SHA256 of the empty string
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
         Ok(())
     }
 }

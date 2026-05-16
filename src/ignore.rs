@@ -54,32 +54,42 @@ pub fn init_ignore_file(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Add a pattern to the ignore file
-pub fn add_pattern(repo_root: &Path, pattern: &str) -> Result<()> {
+/// Add a pattern to the ignore file. Returns true if the pattern was added,
+/// false if it was already present (deduplication).
+pub fn add_pattern(repo_root: &Path, pattern: &str) -> Result<bool> {
     let oci_dir = repo_root.join(crate::index::OCI_DIR);
     fs::create_dir_all(&oci_dir)
         .context("Failed to create .oci directory")?;
-    
+
     let ignore_path = oci_dir.join(OCIGNORE_FILE);
-    
+
     let mut patterns = if ignore_path.exists() {
         fs::read_to_string(&ignore_path)
             .context("Failed to read ignore file")?
     } else {
         String::new()
     };
-    
+
+    let already_present = patterns
+        .lines()
+        .map(str::trim)
+        .any(|line| line == pattern);
+
+    if already_present {
+        return Ok(false);
+    }
+
     if !patterns.is_empty() && !patterns.ends_with('\n') {
         patterns.push('\n');
     }
-    
+
     patterns.push_str(pattern);
     patterns.push('\n');
-    
+
     fs::write(&ignore_path, patterns)
         .context("Failed to write ignore file")?;
-    
-    Ok(())
+
+    Ok(true)
 }
 
 /// Check if a path is the .oci directory

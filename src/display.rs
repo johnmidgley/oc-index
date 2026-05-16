@@ -92,3 +92,45 @@ impl StatusMarker {
         println!("{} {}", self.symbol(), formatted_entry);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn ctx(repo: &str, cwd: &str) -> DisplayContext {
+        DisplayContext::new(PathBuf::from(repo), PathBuf::from(cwd))
+    }
+
+    #[test]
+    fn test_make_relative_from_subdirectory() {
+        // cwd is a subdir of the repo; a sibling file should be shown as ../name
+        let c = ctx("/repo", "/repo/sub");
+        let rel = c.make_relative("other.txt").unwrap();
+        // strip_prefix(/repo/sub) on /repo/other.txt fails, so falls back to repo-relative
+        assert_eq!(rel, "other.txt");
+    }
+
+    #[test]
+    fn test_make_relative_inside_current_dir() {
+        let c = ctx("/repo", "/repo/sub");
+        let rel = c.make_relative("sub/file.txt").unwrap();
+        assert_eq!(rel, "file.txt");
+    }
+
+    #[test]
+    fn test_make_relative_at_repo_root_cwd() {
+        let c = ctx("/repo", "/repo");
+        let rel = c.make_relative("a/b/c.txt").unwrap();
+        assert_eq!(rel, "a/b/c.txt");
+    }
+
+    #[test]
+    fn test_status_marker_symbols() {
+        assert_eq!(StatusMarker::Added.symbol(), "+");
+        assert_eq!(StatusMarker::Updated.symbol(), "U");
+        assert_eq!(StatusMarker::Deleted.symbol(), "-");
+        assert_eq!(StatusMarker::Unchanged.symbol(), "=");
+        assert_eq!(StatusMarker::Ignored.symbol(), "I");
+    }
+}

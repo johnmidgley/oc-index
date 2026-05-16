@@ -41,26 +41,32 @@ impl Config {
         
         let contents = fs::read_to_string(&config_path)
             .context("Failed to read config file")?;
-        
-        let mut version = TOOL_VERSION.to_string();
-        
+
+        let mut version: Option<String> = None;
+
         for line in contents.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            
+
             if let Some((key, value)) = line.split_once('=') {
                 let key = key.trim();
                 let value = value.trim();
-                
+
                 match key {
-                    "version" => version = value.to_string(),
+                    "version" => version = Some(value.to_string()),
                     _ => {} // Ignore unknown keys for forward compatibility
                 }
             }
         }
-        
+
+        let version = version.ok_or_else(|| anyhow::anyhow!(
+            "Config file at {} is missing required 'version' field — it may be corrupt or truncated. \
+             Delete .oci/config and re-run any command to regenerate, or restore from backup.",
+            config_path.display()
+        ))?;
+
         Ok(Config { version })
     }
     

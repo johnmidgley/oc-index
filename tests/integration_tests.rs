@@ -1,33 +1,25 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Once;
+use std::sync::OnceLock;
 use tempfile::TempDir;
 
-static INIT: Once = Once::new();
-static mut OCI_BIN: Option<PathBuf> = None;
+static OCI_BIN: OnceLock<PathBuf> = OnceLock::new();
 
 fn get_oci_binary() -> &'static Path {
-    unsafe {
-        INIT.call_once(|| {
-            // Build the binary once
-            let output = Command::new("cargo")
-                .args(&["build", "--quiet"])
-                .current_dir(env!("CARGO_MANIFEST_DIR"))
-                .output()
-                .expect("Failed to build oci");
-            
-            if !output.status.success() {
-                panic!("Failed to build oci binary");
-            }
-            
-            let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let bin_path = manifest_dir.join("target/debug/oci");
-            OCI_BIN = Some(bin_path);
-        });
-        
-        OCI_BIN.as_ref().unwrap()
-    }
+    OCI_BIN.get_or_init(|| {
+        let output = Command::new("cargo")
+            .args(&["build", "--quiet"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("Failed to build oci");
+
+        if !output.status.success() {
+            panic!("Failed to build oci binary");
+        }
+
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/oci")
+    })
 }
 
 fn run_oci(args: &[&str], working_dir: &Path) -> (String, String, i32) {
@@ -36,11 +28,39 @@ fn run_oci(args: &[&str], working_dir: &Path) -> (String, String, i32) {
         .current_dir(working_dir)
         .output()
         .expect("Failed to execute oci");
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code().unwrap_or(-1);
-    
+
+    (stdout, stderr, exit_code)
+}
+
+fn run_oci_with_stdin(args: &[&str], working_dir: &Path, stdin: &str) -> (String, String, i32) {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = Command::new(get_oci_binary())
+        .args(args)
+        .current_dir(working_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn oci");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin not captured")
+        .write_all(stdin.as_bytes())
+        .expect("Failed to write to stdin");
+
+    let output = child.wait_with_output().expect("Failed to wait for oci");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let exit_code = output.status.code().unwrap_or(-1);
+
     (stdout, stderr, exit_code)
 }
 
@@ -1144,6 +1164,396 @@ fn test_dot_oci_prefix_does_not_match_unrelated_dotfiles() {
         stdout
     );
     assert!(stdout.contains("regular.txt"));
+}
+
+#[test]
+fn test_reset_interactive_yes_clears_index() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    fs::write(test_dir.path().join("a.txt"), "x").unwrap();
+    run_oci(&["update"], test_dir.path());
+
+    let (stdout, _, exit_code) = run_oci_with_stdin(&["reset"], test_dir.path(), "y\n");
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Reset index"));
+
+    let (ls_stdout, _, _) = run_oci(&["ls"], test_dir.path());
+    assert!(
+        !ls_stdout.contains("a.txt"),
+        "Expected index cleared, got ls:\n{}",
+        ls_stdout
+    );
+}
+
+#[test]
+fn test_reset_interactive_no_cancels() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    fs::write(test_dir.path().join("a.txt"), "x").unwrap();
+    run_oci(&["update"], test_dir.path());
+
+    let (stdout, _, exit_code) = run_oci_with_stdin(&["reset"], test_dir.path(), "n\n");
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Reset cancelled"));
+
+    // Index should still contain a.txt
+    let (ls_stdout, _, _) = run_oci(&["ls"], test_dir.path());
+    assert!(ls_stdout.contains("a.txt"));
+}
+
+#[test]
+fn test_deinit_interactive_yes_removes_oci_dir() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    let (stdout, _, exit_code) = run_oci_with_stdin(&["deinit"], test_dir.path(), "y\n");
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Deinitialized"));
+    assert!(!test_dir.path().join(".oci").exists());
+}
+
+#[test]
+fn test_deinit_interactive_no_cancels() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    let (stdout, _, exit_code) = run_oci_with_stdin(&["deinit"], test_dir.path(), "n\n");
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("Deinit cancelled"));
+    assert!(test_dir.path().join(".oci").exists());
+}
+
+#[test]
+fn test_update_single_file_add_and_modify() {
+    // The `update_single_file` path: passing a specific file path to update
+    // adds it on first run and reports it as updated on content change. Sibling
+    // files must not be touched by a single-file update.
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    fs::write(test_dir.path().join("target.txt"), "v1").unwrap();
+    fs::write(test_dir.path().join("sibling.txt"), "untouched").unwrap();
+
+    // First single-file update: target.txt added, sibling untouched
+    let (stdout, _, exit_code) = run_oci(&["update", "target.txt"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout.contains("1 added"), "Expected 1 added, got:\n{}", stdout);
+    assert!(
+        stdout.lines().any(|l| l.starts_with("+") && l.ends_with("target.txt")),
+        "Expected '+' marker for target.txt, got:\n{}",
+        stdout
+    );
+
+    let (ls_stdout, _, _) = run_oci(&["ls"], test_dir.path());
+    assert!(ls_stdout.contains("target.txt"));
+    assert!(
+        !ls_stdout.contains("sibling.txt"),
+        "Single-file update must not index siblings, got:\n{}",
+        ls_stdout
+    );
+
+    // Modify content; sleep briefly to ensure mtime advances
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    fs::write(test_dir.path().join("target.txt"), "v2 longer").unwrap();
+    let (stdout, _, exit_code) = run_oci(&["update", "target.txt"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(
+        stdout.contains("1 updated"),
+        "Expected 1 updated, got:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.lines().any(|l| l.starts_with("U") && l.ends_with("target.txt")),
+        "Expected 'U' marker for target.txt, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn test_grep_with_no_match() {
+    // `oci grep <hash>` for a hash that doesn't exist must report the
+    // "No files found" message and exit 0 (not crash).
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+    fs::write(test_dir.path().join("a.txt"), "hello").unwrap();
+    run_oci(&["update"], test_dir.path());
+
+    let nonexistent_hash = "0".repeat(64);
+    let (stdout, _, exit_code) = run_oci(&["grep", &nonexistent_hash], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(
+        stdout.contains("No files found with hash:"),
+        "Expected 'no files found' message, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn test_status_verbose_shows_unchanged_and_ignored_markers() {
+    // README documents `=` (unchanged) and `I` (ignored) markers shown only
+    // with `-v`. Confirm both appear with `-v` and neither without.
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    fs::write(test_dir.path().join("kept.txt"), "x").unwrap();
+    fs::write(test_dir.path().join("noise.log"), "y").unwrap();
+    run_oci(&["ignore", "*.log"], test_dir.path());
+    run_oci(&["update"], test_dir.path());
+
+    fn has_marker_line(stdout: &str, marker: &str, filename: &str) -> bool {
+        stdout.lines().any(|line| {
+            line.starts_with(marker) && line.ends_with(filename)
+        })
+    }
+
+    // Without -v: neither marker should be present
+    let (stdout_plain, _, _) = run_oci(&["status"], test_dir.path());
+    assert!(!has_marker_line(&stdout_plain, "=", "kept.txt"));
+    assert!(!has_marker_line(&stdout_plain, "I", "noise.log"));
+
+    // With -v: both markers should appear
+    let (stdout_v, _, exit_code) = run_oci(&["status", "-v"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(
+        has_marker_line(&stdout_v, "=", "kept.txt"),
+        "Expected '=' marker line for kept.txt in status -v output:\n{}",
+        stdout_v
+    );
+    assert!(
+        has_marker_line(&stdout_v, "I", "noise.log"),
+        "Expected 'I' marker line for noise.log in status -v output:\n{}",
+        stdout_v
+    );
+}
+
+#[test]
+fn test_update_verbose_shows_unchanged_and_ignored_markers() {
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    fs::write(test_dir.path().join("kept.txt"), "x").unwrap();
+    fs::write(test_dir.path().join("noise.log"), "y").unwrap();
+    run_oci(&["ignore", "*.log"], test_dir.path());
+    run_oci(&["update"], test_dir.path());
+
+    fn has_marker_line(stdout: &str, marker: &str, filename: &str) -> bool {
+        stdout.lines().any(|line| {
+            line.starts_with(marker) && line.ends_with(filename)
+        })
+    }
+
+    // Without -v: a no-op update should not display unchanged/ignored
+    let (stdout_plain, _, _) = run_oci(&["update"], test_dir.path());
+    assert!(!has_marker_line(&stdout_plain, "=", "kept.txt"));
+    assert!(!has_marker_line(&stdout_plain, "I", "noise.log"));
+
+    let (stdout_v, _, exit_code) = run_oci(&["update", "-v"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(
+        has_marker_line(&stdout_v, "=", "kept.txt"),
+        "Expected '=' marker line for kept.txt in update -v output:\n{}",
+        stdout_v
+    );
+    assert!(
+        has_marker_line(&stdout_v, "I", "noise.log"),
+        "Expected 'I' marker line for noise.log in update -v output:\n{}",
+        stdout_v
+    );
+}
+
+#[test]
+fn test_ocignore_to_ignore_migration() {
+    // Repos created with older versions stored patterns in .oci/ocignore.
+    // Loading patterns must transparently rename it to .oci/ignore.
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    // Replace the modern ignore with an old-style ocignore
+    let oci_dir = test_dir.path().join(".oci");
+    let ignore_path = oci_dir.join("ignore");
+    let old_path = oci_dir.join("ocignore");
+    fs::remove_file(&ignore_path).unwrap();
+    fs::write(&old_path, "*.legacy\n").unwrap();
+
+    fs::write(test_dir.path().join("data.legacy"), "x").unwrap();
+    fs::write(test_dir.path().join("keep.txt"), "y").unwrap();
+
+    let (stdout, _, exit_code) = run_oci(&["update"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    // The legacy file should be ignored; only keep.txt is added
+    assert!(
+        stdout.contains("1 added"),
+        "Expected only keep.txt to be added, got:\n{}",
+        stdout
+    );
+
+    // ocignore should have been renamed to ignore
+    assert!(ignore_path.exists(), "Migration should produce .oci/ignore");
+    assert!(!old_path.exists(), "Migration should remove .oci/ocignore");
+
+    let migrated = fs::read_to_string(&ignore_path).unwrap();
+    assert!(migrated.contains("*.legacy"));
+}
+
+#[test]
+fn test_ignore_no_argument_uses_current_directory() {
+    // `oci ignore` with no argument should add the current directory
+    // (relative to the repo root) as the ignored pattern.
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    let sub = test_dir.path().join("logs");
+    fs::create_dir(&sub).unwrap();
+
+    let (stdout, _, exit_code) = run_oci(&["ignore"], &sub);
+    assert_eq!(exit_code, 0);
+    assert!(
+        stdout.contains("Added pattern to ignore: logs"),
+        "Expected current dir relative-to-root to be added, got:\n{}",
+        stdout
+    );
+
+    let ignore_contents = fs::read_to_string(test_dir.path().join(".oci/ignore")).unwrap();
+    assert!(
+        ignore_contents.lines().any(|l| l.trim() == "logs"),
+        "Expected 'logs' line in ignore file:\n{}",
+        ignore_contents
+    );
+}
+
+#[test]
+fn test_version_mismatch_warning() {
+    // A .oci/config with an older version should produce a stderr warning on
+    // any subsequent command, but the command itself must still succeed.
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    let config_path = test_dir.path().join(".oci/config");
+    fs::write(&config_path, "version=0.0.1\n").unwrap();
+
+    let (_, stderr, exit_code) = run_oci(&["ls"], test_dir.path());
+    assert_eq!(exit_code, 0, "Command must still succeed despite warning");
+    assert!(
+        stderr.contains("Warning: Index version mismatch"),
+        "Expected version-mismatch warning, got stderr:\n{}",
+        stderr
+    );
+    assert!(stderr.contains("0.0.1"), "Should mention the stored version");
+}
+
+#[test]
+fn test_update_single_file_detects_deletion() {
+    // Regression: `oci update path/to/file.txt` on a file that has been deleted
+    // from disk but is still in the index must detect the deletion and update
+    // the index, matching the directory-update path. Previously it errored with
+    // "Path does not exist" and left the index untouched.
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    fs::write(test_dir.path().join("doomed.txt"), "bye").unwrap();
+    run_oci(&["update"], test_dir.path());
+
+    // Confirm it's indexed
+    let (ls_stdout, _, _) = run_oci(&["ls"], test_dir.path());
+    assert!(ls_stdout.contains("doomed.txt"));
+
+    // Delete from disk, then ask oci to update that specific path
+    fs::remove_file(test_dir.path().join("doomed.txt")).unwrap();
+
+    let (stdout, _, exit_code) = run_oci(&["update", "doomed.txt"], test_dir.path());
+    assert_eq!(exit_code, 0, "Expected success, got:\n{}", stdout);
+    assert!(
+        stdout.contains("- doomed.txt") || stdout.contains("0 added, 0 updated, 1 removed"),
+        "Expected deletion to be reported, got:\n{}",
+        stdout
+    );
+
+    // It should no longer be in the index
+    let (ls_stdout, _, _) = run_oci(&["ls"], test_dir.path());
+    assert!(
+        !ls_stdout.contains("doomed.txt"),
+        "Expected doomed.txt to be removed from index, got ls output:\n{}",
+        ls_stdout
+    );
+}
+
+#[test]
+fn test_prune_reason_duplicate_wins_over_ignored() {
+    // Regression: a file that is both a duplicate AND matches an ignore pattern
+    // must be counted as a duplicate, not silently reclassified as "ignored".
+    // To trigger both conditions without making source itself have pending
+    // changes, store the same content under a non-matching name in source.
+    let source_dir = TempDir::new().unwrap();
+    let local_dir = TempDir::new().unwrap();
+
+    run_oci(&["init"], source_dir.path());
+    run_oci(&["init"], local_dir.path());
+
+    // Same content, different paths — source's index will have the hash
+    fs::write(source_dir.path().join("other.txt"), "content").unwrap();
+    fs::write(local_dir.path().join("shared.log"), "content").unwrap();
+    run_oci(&["update"], source_dir.path());
+    run_oci(&["update"], local_dir.path());
+
+    // Source ignores *.log — doesn't affect source's other.txt, but the
+    // local shared.log matches BOTH the hash AND this pattern.
+    run_oci(&["ignore", "*.log"], source_dir.path());
+
+    let source_path = source_dir.path().to_str().unwrap();
+    let (stdout, _, exit_code) = run_oci(&["prune", source_path], local_dir.path());
+    assert_eq!(exit_code, 0, "prune failed:\n{}", stdout);
+    assert!(
+        stdout.contains("1 duplicates, 0 ignored"),
+        "Expected duplicate to win over ignored, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn test_ignore_add_dedupes() {
+    // Regression: running `oci ignore <pattern>` twice must not append the
+    // pattern twice; the ignore file should not grow unbounded.
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    let (stdout1, _, exit_code) = run_oci(&["ignore", "*.log"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(stdout1.contains("Added pattern to ignore: *.log"));
+
+    let (stdout2, _, exit_code) = run_oci(&["ignore", "*.log"], test_dir.path());
+    assert_eq!(exit_code, 0);
+    assert!(
+        stdout2.contains("already"),
+        "Expected dedupe message, got:\n{}",
+        stdout2
+    );
+
+    let ignore_contents = fs::read_to_string(test_dir.path().join(".oci/ignore")).unwrap();
+    let count = ignore_contents
+        .lines()
+        .filter(|l| l.trim() == "*.log")
+        .count();
+    assert_eq!(count, 1, "Expected exactly one *.log line, got {}:\n{}", count, ignore_contents);
+}
+
+#[test]
+fn test_config_missing_version_field_errors() {
+    // Regression: a config file that exists but has no version= line must
+    // surface an error, not silently masquerade as the current tool version.
+    let test_dir = TempDir::new().unwrap();
+    run_oci(&["init"], test_dir.path());
+
+    // Corrupt the config: replace with content that has no version= line
+    let config_path = test_dir.path().join(".oci/config");
+    fs::write(&config_path, "# comment only, no version\n").unwrap();
+
+    let (_, stderr, exit_code) = run_oci(&["ls"], test_dir.path());
+    assert_ne!(exit_code, 0, "Expected non-zero exit, got stderr:\n{}", stderr);
+    assert!(
+        stderr.contains("missing required 'version' field"),
+        "Expected corruption error on stderr, got:\n{}",
+        stderr
+    );
 }
 
 #[test]
