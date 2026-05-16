@@ -1,0 +1,6 @@
+{
+    "name": "oci-rust",
+    "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+    "workspaceFolder": "/workspaces/oc-index",
+    "remoteUser": "vscode"
+}
