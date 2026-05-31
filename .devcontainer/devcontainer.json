@@ -1,6 +1,54 @@
 {
-    "name": "oci-rust",
-    "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
-    "workspaceFolder": "/workspaces/oc-index",
-    "remoteUser": "vscode"
+  "name": "oci-index",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "TZ": "${localEnv:TZ:America/Los_Angeles}",
+      "CLAUDE_CODE_VERSION": "latest",
+      "GIT_DELTA_VERSION": "0.18.2",
+      "NODE_MAJOR": "20"
+    }
+  },
+  // NET_ADMIN/NET_RAW let init-firewall.sh program iptables — this is the
+  // security boundary that makes --dangerously-skip-permissions defensible.
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW"
+  ],
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "rust-lang.rust-analyzer",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "bash",
+            "icon": "terminal-bash"
+          },
+          "zsh": {
+            "path": "zsh"
+          }
+        }
+      }
+    }
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspaces/oc-index",
+  "mounts": [
+    "source=oci-claude-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
+    "source=oci-claude-config-${devcontainerId},target=/home/vscode/.claude,type=volume"
+  ],
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+  },
+  // Re-arm the firewall on every container start (runs as root via sudoers).
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  "waitFor": "postStartCommand"
 }
